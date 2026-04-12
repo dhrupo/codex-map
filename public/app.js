@@ -124,6 +124,30 @@ function defaultStatsRange() {
   };
 }
 
+function statsPresetRange(preset) {
+  const now = new Date();
+  const end = new Date(now);
+  let start = new Date(now);
+
+  if (preset === '7d') {
+    start = new Date(end.getTime() - (6 * 24 * 60 * 60 * 1000));
+  } else if (preset === '30d') {
+    start = new Date(end.getTime() - (29 * 24 * 60 * 60 * 1000));
+  } else if (preset === '90d') {
+    start = new Date(end.getTime() - (89 * 24 * 60 * 60 * 1000));
+  } else if (preset === 'month') {
+    start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  } else if (preset === 'all') {
+    const first = State.usageStats?.daily?.find(row => row.prompts || row.sessions || row.tools)?.date;
+    return first ? { from: first, to: isoDateOnly(end) } : defaultStatsRange();
+  }
+
+  return {
+    from: isoDateOnly(start),
+    to: isoDateOnly(end)
+  };
+}
+
 async function init() {
   setLoading(true);
   State.statsRange = defaultStatsRange();
@@ -443,6 +467,13 @@ function renderStats() {
             <button class="ghost" onclick="resetStatsRange()">Last 30 days</button>
           </div>
         </div>
+        <div class="stats-presets">
+          <button class="ghost" onclick="applyStatsPreset('7d')">7D</button>
+          <button class="ghost" onclick="applyStatsPreset('30d')">30D</button>
+          <button class="ghost" onclick="applyStatsPreset('90d')">90D</button>
+          <button class="ghost" onclick="applyStatsPreset('month')">This Month</button>
+          <button class="ghost" onclick="applyStatsPreset('all')">All Time</button>
+        </div>
       `)}
       <div class="stats-summary">
         ${summary.map((item, index) => `
@@ -505,6 +536,16 @@ async function resetStatsRange() {
     () => loadCurrentView(),
     'Stats reset',
     'Showing last 30 days'
+  );
+}
+
+async function applyStatsPreset(preset) {
+  State.statsRange = statsPresetRange(preset);
+  setLoading(true);
+  await runOperation(
+    () => loadCurrentView(),
+    'Stats updated',
+    `${State.statsRange.from} → ${State.statsRange.to}`
   );
 }
 
@@ -1263,6 +1304,7 @@ window.selectGlobal = selectGlobal;
 window.selectProject = selectProject;
 window.setTab = setTab;
 window.applyStatsRange = applyStatsRange;
+window.applyStatsPreset = applyStatsPreset;
 window.resetStatsRange = resetStatsRange;
 window.addPath = addPath;
 window.removePinnedProject = removePinnedProject;

@@ -454,6 +454,21 @@ input {
   flex-wrap: wrap;
 }
 
+.stats-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.stats-presets .ghost {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.44);
+  color: var(--text);
+}
+
 .stats-summary {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -817,6 +832,13 @@ pre {
   max-height: 80vh;
   overflow: auto;
   padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(247, 240, 229, 0.98));
+  border: 1px solid rgba(60, 45, 22, 0.14);
+}
+
+[data-theme="dark"] .dialog {
+  background: linear-gradient(180deg, rgba(25, 33, 41, 0.98), rgba(18, 24, 30, 0.98));
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .crumbs,
