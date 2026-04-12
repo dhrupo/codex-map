@@ -1172,11 +1172,15 @@ async function renderBrowser() {
   `).join('');
 
   document.getElementById('browser-list').innerHTML = `
+    <p class="muted browser-note">${data.codexOnly ? 'Showing Codex-ready folders in this location.' : 'No Codex-ready folders found here yet. Browse deeper or select a folder manually.'}</p>
     ${data.parent ? `<button class="browser-item" onclick='openBrowser(${jsQuote(data.parent)})'>..</button>` : ''}
     ${data.dirs.map(dir => `
       <div class="browser-row">
-        <button class="browser-item" onclick='openBrowser(${jsQuote(dir.path)})'>${escapeHtml(dir.name)}</button>
-        <button class="btn btn-small" onclick='chooseBrowserPath(${jsQuote(dir.path)})'>Select</button>
+        <button class="browser-item" onclick='${dir.isProject ? `chooseBrowserPath(${jsQuote(dir.path)})` : `openBrowser(${jsQuote(dir.path)})`}' title="${escapeHtml(dir.path)}">
+          <span>${escapeHtml(dir.name)}</span>
+          ${dir.isProject ? `<span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>` : ''}
+        </button>
+        <button class="btn btn-small" onclick='${dir.isProject ? `openBrowser(${jsQuote(dir.path)})` : `chooseBrowserPath(${jsQuote(dir.path)})`}'>${dir.isProject ? 'Open' : 'Select'}</button>
       </div>
     `).join('')}
   `;
@@ -1185,6 +1189,7 @@ async function renderBrowser() {
 async function chooseBrowserPath(projectPath) {
   await addPinnedProject(projectPath);
   closeBrowser();
+  selectProject(projectPath);
 }
 
 function openSkillModal() {

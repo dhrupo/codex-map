@@ -863,10 +863,22 @@ pre {
   margin-top: 14px;
 }
 
+.browser-note {
+  margin: 0 0 6px;
+}
+
 .browser-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+.browser-row .browser-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
 }
 
 .skill-textarea {

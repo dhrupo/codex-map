@@ -1042,14 +1042,44 @@ function isPathAllowed(requestedPath, projectPath) {
   return allowed.some(base => resolved === base || resolved.startsWith(`${base}${path.sep}`));
 }
 
+function inspectProjectPath(projectPath) {
+  const resolved = path.resolve(projectPath);
+  const hasAgents = fileExists(path.join(resolved, 'AGENTS.md'));
+  const hasCodexDir = fileExists(path.join(resolved, '.codex'));
+  const hasMcp = fileExists(path.join(resolved, '.mcp.json')) || fileExists(path.join(resolved, '.codex', '.mcp.json'));
+  const score = [hasAgents, hasCodexDir, hasMcp].filter(Boolean).length;
+  return {
+    hasAgents,
+    hasCodexDir,
+    hasMcp,
+    score,
+    status: score >= 2 ? 'full' : score === 1 ? 'partial' : 'none',
+    isProject: score > 0
+  };
+}
+
 function browseDir(dirPath, showHidden) {
   const resolved = path.resolve(dirPath);
   const entries = fs.readdirSync(resolved, { withFileTypes: true });
   const dirs = entries
     .filter(entry => entry.isDirectory())
     .filter(entry => showHidden || !entry.name.startsWith('.'))
-    .map(entry => ({ name: entry.name, path: path.join(resolved, entry.name) }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map(entry => {
+      const fullPath = path.join(resolved, entry.name);
+      const meta = inspectProjectPath(fullPath);
+      return {
+        name: entry.name,
+        path: fullPath,
+        ...meta
+      };
+    });
+
+  const projectDirs = dirs.filter(dir => dir.isProject);
+  const visibleDirs = projectDirs.length ? projectDirs : dirs;
+  visibleDirs.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    return a.name.localeCompare(b.name);
+  });
 
   const root = path.parse(resolved).root;
   const rel = path.relative(root, resolved);
@@ -1066,7 +1096,8 @@ function browseDir(dirPath, showHidden) {
     current: resolved,
     parent: resolved !== root ? path.dirname(resolved) : null,
     crumbs,
-    dirs
+    dirs: visibleDirs,
+    codexOnly: projectDirs.length > 0
   };
 }
 
@@ -1143,12 +1174,8 @@ app.get('/api/project-status', (req, res) => {
 
   const resolved = path.resolve(projectPath);
   if (!fileExists(resolved)) return res.json({ status: 'missing' });
-
-  const hasAgents = fileExists(path.join(resolved, 'AGENTS.md'));
-  const hasCodexDir = fileExists(path.join(resolved, '.codex'));
-  const hasMcp = fileExists(path.join(resolved, '.mcp.json')) || fileExists(path.join(resolved, '.codex', '.mcp.json'));
-  const score = [hasAgents, hasCodexDir, hasMcp].filter(Boolean).length;
-  res.json({ status: score >= 2 ? 'full' : score === 1 ? 'partial' : 'none' });
+  const meta = inspectProjectPath(resolved);
+  res.json({ status: meta.status, ...meta });
 });
 
 app.get('/api/analyze', (req, res) => {
