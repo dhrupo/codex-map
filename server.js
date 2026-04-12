@@ -1058,8 +1058,47 @@ function inspectProjectPath(projectPath) {
   };
 }
 
+function discoverProjectPaths(rootPath, showHidden, maxDepth = 4, maxResults = 80) {
+  const root = path.resolve(rootPath);
+  const found = [];
+  const seen = new Set();
+
+  function walk(currentPath, depth) {
+    if (found.length >= maxResults || depth > maxDepth) return;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (!showHidden && entry.name.startsWith('.')) continue;
+      const fullPath = path.join(currentPath, entry.name);
+      const meta = inspectProjectPath(fullPath);
+      if (meta.isProject && !seen.has(fullPath)) {
+        seen.add(fullPath);
+        found.push({
+          name: path.basename(fullPath),
+          path: fullPath,
+          ...meta
+        });
+        if (found.length >= maxResults) return;
+      }
+      walk(fullPath, depth + 1);
+      if (found.length >= maxResults) return;
+    }
+  }
+
+  walk(root, 1);
+  return found;
+}
+
 function browseDir(dirPath, showHidden) {
   const resolved = path.resolve(dirPath);
+  const config = readConfigToml();
   const entries = fs.readdirSync(resolved, { withFileTypes: true });
   const dirs = entries
     .filter(entry => entry.isDirectory())
@@ -1075,11 +1114,29 @@ function browseDir(dirPath, showHidden) {
     });
 
   const projectDirs = dirs.filter(dir => dir.isProject);
+  const discovered = discoverProjectPaths(resolved, showHidden)
+    .filter(item => item.path !== resolved && !projectDirs.some(dir => dir.path === item.path));
+  const trustedProjects = getConfiguredProjects(config)
+    .filter(item => item.exists && item.path.startsWith(`${resolved}${path.sep}`))
+    .map(item => ({
+      name: item.name,
+      path: item.path,
+      status: item.status,
+      isProject: item.status !== 'none',
+      score: item.status === 'full' ? 3 : item.status === 'partial' ? 1 : 0,
+      trusted: true
+    }))
+    .filter(item => !projectDirs.some(dir => dir.path === item.path) && !discovered.some(dir => dir.path === item.path));
   const visibleDirs = projectDirs.length ? projectDirs : dirs;
   visibleDirs.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
     return a.name.localeCompare(b.name);
   });
+  discovered.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    return a.path.localeCompare(b.path);
+  });
+  trustedProjects.sort((a, b) => a.path.localeCompare(b.path));
 
   const root = path.parse(resolved).root;
   const rel = path.relative(root, resolved);
@@ -1097,7 +1154,9 @@ function browseDir(dirPath, showHidden) {
     parent: resolved !== root ? path.dirname(resolved) : null,
     crumbs,
     dirs: visibleDirs,
-    codexOnly: projectDirs.length > 0
+    codexOnly: projectDirs.length > 0,
+    discovered,
+    trustedProjects
   };
 }
 

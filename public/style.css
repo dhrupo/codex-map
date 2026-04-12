@@ -867,6 +867,19 @@ pre {
   margin: 0 0 6px;
 }
 
+.browser-section {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.browser-section strong {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .browser-row {
   display: grid;
   grid-template-columns: 1fr auto;

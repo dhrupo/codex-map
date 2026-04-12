@@ -1173,6 +1173,34 @@ async function renderBrowser() {
 
   document.getElementById('browser-list').innerHTML = `
     <p class="muted browser-note">${data.codexOnly ? 'Showing Codex-ready folders in this location.' : 'No Codex-ready folders found here yet. Browse deeper or select a folder manually.'}</p>
+    ${data.trustedProjects?.length ? `
+      <div class="browser-section">
+        <strong>Trusted Projects</strong>
+        ${data.trustedProjects.map(dir => `
+          <div class="browser-row">
+            <button class="browser-item" onclick='chooseBrowserPath(${jsQuote(dir.path)})' title="${escapeHtml(dir.path)}">
+              <span>${escapeHtml(dir.name)}</span>
+              <span class="status-pill ${escapeHtml(dir.status)}">Trusted</span>
+            </button>
+            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Open</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    ${data.discovered?.length ? `
+      <div class="browser-section">
+        <strong>Discovered Nested Projects</strong>
+        ${data.discovered.map(dir => `
+          <div class="browser-row">
+            <button class="browser-item" onclick='chooseBrowserPath(${jsQuote(dir.path)})' title="${escapeHtml(dir.path)}">
+              <span>${escapeHtml(dir.path.replace(`${State.browserPath}/`, ''))}</span>
+              <span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>
+            </button>
+            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Open</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
     ${data.parent ? `<button class="browser-item" onclick='openBrowser(${jsQuote(data.parent)})'>..</button>` : ''}
     ${data.dirs.map(dir => `
       <div class="browser-row">
