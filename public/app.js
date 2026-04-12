@@ -1182,7 +1182,7 @@ async function renderBrowser() {
               <span>${escapeHtml(dir.name)}</span>
               <span class="status-pill ${escapeHtml(dir.status)}">Trusted</span>
             </button>
-            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Open</button>
+            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Browse</button>
           </div>
         `).join('')}
       </div>
@@ -1196,7 +1196,7 @@ async function renderBrowser() {
               <span>${escapeHtml(dir.path.replace(`${State.browserPath}/`, ''))}</span>
               <span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>
             </button>
-            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Open</button>
+            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Browse</button>
           </div>
         `).join('')}
       </div>
@@ -1208,7 +1208,7 @@ async function renderBrowser() {
           <span>${escapeHtml(dir.name)}</span>
           ${dir.isProject ? `<span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>` : ''}
         </button>
-        <button class="btn btn-small" onclick='${dir.isProject ? `openBrowser(${jsQuote(dir.path)})` : `chooseBrowserPath(${jsQuote(dir.path)})`}'>${dir.isProject ? 'Open' : 'Select'}</button>
+        <button class="btn btn-small" onclick='${dir.isProject ? `openBrowser(${jsQuote(dir.path)})` : `chooseBrowserPath(${jsQuote(dir.path)})`}'>${dir.isProject ? 'Browse' : 'Select'}</button>
       </div>
     `).join('')}
   `;
