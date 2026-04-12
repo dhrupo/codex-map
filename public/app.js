@@ -1182,7 +1182,6 @@ async function renderBrowser() {
               <span>${escapeHtml(dir.name)}</span>
               <span class="status-pill ${escapeHtml(dir.status)}">Trusted</span>
             </button>
-            <button class="btn btn-small" onclick='chooseBrowserPath(${jsQuote(dir.path)}, "raw")'>Files</button>
           </div>
         `).join('')}
       </div>
@@ -1196,7 +1195,6 @@ async function renderBrowser() {
               <span>${escapeHtml(dir.path.replace(`${State.browserPath}/`, ''))}</span>
               <span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>
             </button>
-            <button class="btn btn-small" onclick='chooseBrowserPath(${jsQuote(dir.path)}, "raw")'>Files</button>
           </div>
         `).join('')}
       </div>
@@ -1208,7 +1206,7 @@ async function renderBrowser() {
           <span>${escapeHtml(dir.name)}</span>
           ${dir.isProject ? `<span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>` : ''}
         </button>
-        <button class="btn btn-small" onclick='${dir.isProject ? `chooseBrowserPath(${jsQuote(dir.path)}, "raw")` : `chooseBrowserPath(${jsQuote(dir.path)})`}'>${dir.isProject ? 'Files' : 'Select'}</button>
+        ${dir.isProject ? '' : `<button class="btn btn-small" onclick='chooseBrowserPath(${jsQuote(dir.path)})'>Select</button>`}
       </div>
     `).join('')}
   `;
