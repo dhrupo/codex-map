@@ -723,37 +723,48 @@ function readSessionDetail(sessionId) {
   };
 }
 
-function countToolUsage(projectPath = null, days = 30) {
-  const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+function normalizeStatsRange({ days = 14, from = null, to = null } = {}) {
+  const end = to ? new Date(`${to}T23:59:59.999Z`) : new Date();
+  const start = from ? new Date(`${from}T00:00:00.000Z`) : new Date(end.getTime() - ((days - 1) * 24 * 60 * 60 * 1000));
+  return {
+    start,
+    end,
+    period: `${start.toISOString().slice(0, 10)}..${end.toISOString().slice(0, 10)}`
+  };
+}
+
+function countToolUsage(projectPath = null, options = {}) {
+  const range = normalizeStatsRange(options);
   const usage = {};
   let scanned = 0;
 
   for (const session of listSessions(projectPath)) {
-    if (session.updatedAt && new Date(session.updatedAt).getTime() < cutoff) continue;
+    const ts = session.updatedAt ? new Date(session.updatedAt).getTime() : 0;
+    if (!ts || ts < range.start.getTime() || ts > range.end.getTime()) continue;
     scanned += 1;
     for (const [tool, count] of Object.entries(session.toolBreakdown || {})) {
       usage[tool] = (usage[tool] || 0) + count;
     }
   }
 
-  return { toolUsage: usage, sessionsScanned: scanned, period: `${days}d` };
+  return { toolUsage: usage, sessionsScanned: scanned, period: range.period, from: range.start.toISOString().slice(0, 10), to: range.end.toISOString().slice(0, 10) };
 }
 
-function countDailyUsage(projectPath = null, days = 14) {
+function countDailyUsage(projectPath = null, options = {}) {
   const target = projectPath ? path.resolve(projectPath) : null;
-  const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+  const range = normalizeStatsRange(options);
   const byDate = new Map();
   const filteredSessions = listSessions(target);
   const allowedSessionIds = new Set(filteredSessions.map(session => session.id));
 
-  for (let i = days - 1; i >= 0; i -= 1) {
-    const date = new Date(Date.now() - (i * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+  for (let ts = range.start.getTime(); ts <= range.end.getTime(); ts += 24 * 60 * 60 * 1000) {
+    const date = new Date(ts).toISOString().slice(0, 10);
     byDate.set(date, { date, prompts: 0, sessions: 0, tools: 0 });
   }
 
   for (const entry of readHistoryEntries(5000)) {
     const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0;
-    if (!ts || ts < cutoff) continue;
+    if (!ts || ts < range.start.getTime() || ts > range.end.getTime()) continue;
     if (target && !allowedSessionIds.has(entry.sessionId)) continue;
     const date = new Date(ts).toISOString().slice(0, 10);
     const bucket = byDate.get(date);
@@ -762,7 +773,7 @@ function countDailyUsage(projectPath = null, days = 14) {
 
   for (const session of filteredSessions) {
     const ts = session.updatedAt ? new Date(session.updatedAt).getTime() : 0;
-    if (!ts || ts < cutoff) continue;
+    if (!ts || ts < range.start.getTime() || ts > range.end.getTime()) continue;
     const date = new Date(ts).toISOString().slice(0, 10);
     const bucket = byDate.get(date);
     if (!bucket) continue;
@@ -773,11 +784,13 @@ function countDailyUsage(projectPath = null, days = 14) {
   return Array.from(byDate.values());
 }
 
-function buildUsageStats(projectPath = null, days = 14) {
-  const daily = countDailyUsage(projectPath, days);
-  const tools = countToolUsage(projectPath, days);
+function buildUsageStats(projectPath = null, options = {}) {
+  const daily = countDailyUsage(projectPath, options);
+  const tools = countToolUsage(projectPath, options);
   return {
-    period: `${days}d`,
+    period: tools.period,
+    from: tools.from,
+    to: tools.to,
     daily,
     topTools: Object.entries(tools.toolUsage)
       .sort((a, b) => b[1] - a[1])
@@ -1567,13 +1580,21 @@ app.get('/api/history', (req, res) => {
 app.get('/api/stats/tools', (req, res) => {
   const projectPath = req.query.project || null;
   const days = parseInt(req.query.days, 10) || 30;
-  res.json(countToolUsage(projectPath, days));
+  res.json(countToolUsage(projectPath, {
+    days,
+    from: req.query.from || null,
+    to: req.query.to || null
+  }));
 });
 
 app.get('/api/stats/usage', (req, res) => {
   const projectPath = req.query.project || null;
   const days = parseInt(req.query.days, 10) || 14;
-  res.json(buildUsageStats(projectPath, days));
+  res.json(buildUsageStats(projectPath, {
+    days,
+    from: req.query.from || null,
+    to: req.query.to || null
+  }));
 });
 
 app.get('/api/events', (req, res) => {

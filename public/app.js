@@ -3,6 +3,7 @@ const State = {
   mode: 'global',
   projectPath: '',
   currentTab: 'overview',
+  statsRange: null,
   theme: 'light',
   scan: null,
   analysis: null,
@@ -110,8 +111,22 @@ function getCurrentTree() {
   return State.mode === 'project' ? State.scan?.project?.fileTree : State.scan?.global?.fileTree;
 }
 
+function isoDateOnly(value) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function defaultStatsRange() {
+  const end = new Date();
+  const start = new Date(end.getTime() - (29 * 24 * 60 * 60 * 1000));
+  return {
+    from: isoDateOnly(start),
+    to: isoDateOnly(end)
+  };
+}
+
 async function init() {
   setLoading(true);
+  State.statsRange = defaultStatsRange();
   const savedTheme = localStorage.getItem('codex-map-theme') || 'light';
   applyTheme(savedTheme);
   await loadPinnedProjects();
@@ -123,10 +138,15 @@ async function init() {
 async function loadCurrentView() {
   try {
     const projectQuery = State.mode === 'project' ? `?project=${encodeURIComponent(State.projectPath)}` : '';
+    const statsParams = new URLSearchParams();
+    if (State.mode === 'project') statsParams.set('project', State.projectPath);
+    if (State.statsRange?.from) statsParams.set('from', State.statsRange.from);
+    if (State.statsRange?.to) statsParams.set('to', State.statsRange.to);
+    const statsQuery = statsParams.toString() ? `?${statsParams.toString()}` : '';
     State.scan = await API.get(`/api/scan${projectQuery}`);
     State.history = (await API.get(`/api/history${projectQuery}`)).entries || [];
-    State.toolStats = await API.get(`/api/stats/tools${projectQuery}`);
-    State.usageStats = await API.get(`/api/stats/usage${projectQuery}`);
+    State.toolStats = await API.get(`/api/stats/tools${statsQuery}`);
+    State.usageStats = await API.get(`/api/stats/usage${statsQuery}`);
     State.pluginData = await API.get('/api/plugins');
 
     if (State.mode === 'project') {
@@ -408,6 +428,22 @@ function renderStats() {
   const summary = buildStatsSummary(usage);
   return `
     <div class="stats-dashboard">
+      ${panel('Date Range', `
+        <div class="stats-range">
+          <label class="stats-field">
+            <span>From</span>
+            <input id="stats-from" type="date" value="${escapeHtml(State.statsRange?.from || '')}">
+          </label>
+          <label class="stats-field">
+            <span>To</span>
+            <input id="stats-to" type="date" value="${escapeHtml(State.statsRange?.to || '')}">
+          </label>
+          <div class="stats-range-actions">
+            <button class="btn btn-small" onclick="applyStatsRange()">Apply</button>
+            <button class="ghost" onclick="resetStatsRange()">Last 30 days</button>
+          </div>
+        </div>
+      `)}
       <div class="stats-summary">
         ${summary.map((item, index) => `
           <article class="stat-tile ${index === 0 ? 'emphasis' : ''}">
@@ -440,6 +476,36 @@ function buildStatsSummary(usage) {
     { label: 'Peak Day', value: formatNumber(longestDay?.prompts || 0), sub: longestDay?.date || '—' },
     { label: 'First Active', value: firstDay?.date || '—', sub: firstDay ? 'within range' : '' }
   ];
+}
+
+async function applyStatsRange() {
+  const from = document.getElementById('stats-from')?.value;
+  const to = document.getElementById('stats-to')?.value;
+  if (!from || !to) {
+    showToast('Invalid date range', 'Both start and end dates are required.', 'error');
+    return;
+  }
+  if (from > to) {
+    showToast('Invalid date range', 'Start date must be before end date.', 'error');
+    return;
+  }
+  State.statsRange = { from, to };
+  setLoading(true);
+  await runOperation(
+    () => loadCurrentView(),
+    'Stats updated',
+    `${from} → ${to}`
+  );
+}
+
+async function resetStatsRange() {
+  State.statsRange = defaultStatsRange();
+  setLoading(true);
+  await runOperation(
+    () => loadCurrentView(),
+    'Stats reset',
+    'Showing last 30 days'
+  );
 }
 
 function usageChart(rows) {
@@ -846,7 +912,7 @@ function renderPlugins() {
 
   return `
     <div class="grid two">
-      ${panel('Installed Plugins', plugins.length ? plugins.map(plugin => `
+      ${panel('Installed Plugins', plugins.length ? `<div class="chart-list plugins-list-scroll">${plugins.map(plugin => `
         <article class="mini-card">
           <strong>${escapeHtml(plugin.displayName || plugin.name)}</strong>
           <p>${escapeHtml(plugin.description || 'No description.')}</p>
@@ -856,8 +922,8 @@ function renderPlugins() {
             <button class="ghost" onclick='deletePlugin(${jsQuote(plugin.name)})'>Delete</button>
           </div>
         </article>
-      `).join('') : '<p class="muted">No plugin manifests detected.</p>', `<button class="btn btn-small" onclick='createPlugin()'>New plugin</button>`)}
-      ${panel('Tool Activity', activity || '<p class="muted">No recent tool events.</p>')}
+      `).join('')}</div>` : '<p class="muted">No plugin manifests detected.</p>', `<button class="btn btn-small" onclick='createPlugin()'>New plugin</button>`)}
+      ${panel('Tool Activity', activity ? `<div class="chart-list tool-activity-scroll">${activity}</div>` : '<p class="muted">No recent tool events.</p>')}
     </div>
   `;
 }
@@ -1196,6 +1262,8 @@ window.toggleTheme = toggleTheme;
 window.selectGlobal = selectGlobal;
 window.selectProject = selectProject;
 window.setTab = setTab;
+window.applyStatsRange = applyStatsRange;
+window.resetStatsRange = resetStatsRange;
 window.addPath = addPath;
 window.removePinnedProject = removePinnedProject;
 window.openSession = openSession;

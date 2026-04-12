@@ -430,6 +430,30 @@ input {
   gap: 18px;
 }
 
+.stats-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 200px)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.stats-field {
+  display: grid;
+  gap: 6px;
+}
+
+.stats-field span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.stats-range-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .stats-summary {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -569,6 +593,14 @@ input {
 }
 
 .history-list {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 6px;
+  align-content: start;
+}
+
+.plugins-list-scroll,
+.tool-activity-scroll {
   max-height: 420px;
   overflow: auto;
   padding-right: 6px;
@@ -849,6 +881,10 @@ pre {
 
   .stats-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats-range {
+    grid-template-columns: 1fr;
   }
 
   .main {
