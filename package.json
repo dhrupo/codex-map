@@ -1,0 +1,41 @@
+{
+  "name": "codex-map",
+  "version": "0.1.0",
+  "description": "Visual dashboard for inspecting and mapping your Codex CLI setup",
+  "main": "server.js",
+  "bin": {
+    "codex-map": "bin/cli.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "files": [
+    "bin/",
+    "public/",
+    "server.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "codex",
+    "codex-cli",
+    "codex-map",
+    "dashboard",
+    "skills",
+    "mcp",
+    "agents",
+    "sessions",
+    "openai"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "chokidar": "^3.6.0",
+    "express": "^4.18.2",
+    "gray-matter": "^4.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

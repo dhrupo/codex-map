@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codex Map</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <link id="hljs-light" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
+  <link id="hljs-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" disabled>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <button class="brand" onclick="selectGlobal()">
+        <span>Codex Map</span>
+      </button>
+
+      <div class="sidebar-card">
+        <div class="sidebar-row">
+          <h2>Projects</h2>
+          <button class="btn btn-small" onclick="openBrowser()">Add</button>
+        </div>
+        <div class="input-row">
+          <input id="path-input" type="text" placeholder="Paste project path">
+          <button class="btn btn-small" onclick="addPath()">Go</button>
+        </div>
+        <div id="project-list" class="project-list"></div>
+      </div>
+
+      <div class="sidebar-actions">
+        <button class="btn" onclick="toggleTheme()">Theme</button>
+        <button class="btn" onclick="downloadExport()">Export JSON</button>
+        <button class="btn" onclick="downloadBundle()">Bundle</button>
+      </div>
+
+      <div class="sidebar-meta">
+        <span id="sse-status">Connecting…</span>
+        <span id="scan-meta"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Visual Codex dashboard</p>
+          <h1 id="hero-title">Your Codex setup, finally visible.</h1>
+          <p id="hero-subtitle" class="hero-copy">Scan global config, compare project skills, inspect sessions, and export the setup you actually use.</p>
+        </div>
+        <div class="hero-metrics" id="hero-metrics"></div>
+      </header>
+
+      <nav id="tabs" class="tabs"></nav>
+      <section id="content" class="content"></section>
+    </main>
+  </div>
+
+  <div id="browser-modal" class="modal hidden" onclick="closeBrowser()">
+    <div class="dialog" onclick="event.stopPropagation()">
+      <div class="dialog-head">
+        <h3>Select Project Folder</h3>
+        <button class="btn btn-small" onclick="closeBrowser()">Close</button>
+      </div>
+      <div id="browser-crumbs" class="crumbs"></div>
+      <div id="browser-bookmarks" class="bookmarks"></div>
+      <div id="browser-list" class="browser-list"></div>
+    </div>
+  </div>
+
+  <div id="skill-modal" class="modal hidden" onclick="closeSkillModal()">
+    <div class="dialog" onclick="event.stopPropagation()">
+      <div class="dialog-head">
+        <h3 id="skill-modal-title">Edit Skill</h3>
+        <button class="btn btn-small" onclick="closeSkillModal()">Close</button>
+      </div>
+      <div class="input-row">
+        <input id="skill-name-input" type="text" placeholder="skill-name">
+        <button class="btn btn-small" onclick="saveSkill()">Save</button>
+      </div>
+      <textarea id="skill-content-input" class="skill-textarea" placeholder="---&#10;name: My Skill&#10;description: What it does&#10;allowed-tools: Bash, Read&#10;---&#10;&#10;Instructions..."></textarea>
+      <div class="dialog-head">
+        <small id="skill-scope-label"></small>
+        <button id="skill-delete-btn" class="ghost" onclick="deleteSkill()">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
