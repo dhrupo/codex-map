@@ -234,10 +234,10 @@ function selectGlobal() {
   loadCurrentView();
 }
 
-function selectProject(projectPath) {
+function selectProject(projectPath, tab = 'map') {
   State.mode = 'project';
   State.projectPath = projectPath;
-  State.currentTab = 'map';
+  State.currentTab = tab;
   State.activeSessionId = null;
   loadCurrentView();
 }
@@ -1182,7 +1182,7 @@ async function renderBrowser() {
               <span>${escapeHtml(dir.name)}</span>
               <span class="status-pill ${escapeHtml(dir.status)}">Trusted</span>
             </button>
-            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Browse</button>
+            <button class="btn btn-small" onclick='chooseBrowserPath(${jsQuote(dir.path)}, "raw")'>Files</button>
           </div>
         `).join('')}
       </div>
@@ -1196,7 +1196,7 @@ async function renderBrowser() {
               <span>${escapeHtml(dir.path.replace(`${State.browserPath}/`, ''))}</span>
               <span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>
             </button>
-            <button class="btn btn-small" onclick='openBrowser(${jsQuote(dir.path)})'>Browse</button>
+            <button class="btn btn-small" onclick='chooseBrowserPath(${jsQuote(dir.path)}, "raw")'>Files</button>
           </div>
         `).join('')}
       </div>
@@ -1208,16 +1208,16 @@ async function renderBrowser() {
           <span>${escapeHtml(dir.name)}</span>
           ${dir.isProject ? `<span class="status-pill ${escapeHtml(dir.status)}">${escapeHtml(dir.status === 'full' ? 'Codex ready' : 'Partial')}</span>` : ''}
         </button>
-        <button class="btn btn-small" onclick='${dir.isProject ? `openBrowser(${jsQuote(dir.path)})` : `chooseBrowserPath(${jsQuote(dir.path)})`}'>${dir.isProject ? 'Browse' : 'Select'}</button>
+        <button class="btn btn-small" onclick='${dir.isProject ? `chooseBrowserPath(${jsQuote(dir.path)}, "raw")` : `chooseBrowserPath(${jsQuote(dir.path)})`}'>${dir.isProject ? 'Files' : 'Select'}</button>
       </div>
     `).join('')}
   `;
 }
 
-async function chooseBrowserPath(projectPath) {
+async function chooseBrowserPath(projectPath, tab = 'map') {
   await addPinnedProject(projectPath);
   closeBrowser();
-  selectProject(projectPath);
+  selectProject(projectPath, tab);
 }
 
 function openSkillModal() {
