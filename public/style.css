@@ -568,6 +568,21 @@ input {
   gap: 10px;
 }
 
+.history-list {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 6px;
+  align-content: start;
+}
+
+.history-item {
+  min-width: 0;
+}
+
+.history-item p {
+  overflow-wrap: anywhere;
+}
+
 .session-browser {
   display: grid;
   grid-template-columns: minmax(300px, 360px) 1fr;
@@ -716,6 +731,53 @@ pre {
 
 .modal.hidden {
   display: none;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2200;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+}
+
+.toast {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+  background: rgba(36, 25, 15, 0.92);
+  color: #fff8ef;
+  box-shadow: var(--shadow);
+  transform: translateY(8px);
+  opacity: 0;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.toast.visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.toast.success {
+  background: rgba(10, 138, 114, 0.94);
+}
+
+.toast.error {
+  background: rgba(162, 54, 54, 0.96);
+}
+
+.toast-title {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.toast-body {
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.94;
 }
 
 .dialog {

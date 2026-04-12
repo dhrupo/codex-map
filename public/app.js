@@ -53,6 +53,34 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function showToast(title, body = '', tone = 'success') {
+  const stack = document.getElementById('toast-stack');
+  if (!stack) return;
+  const toast = document.createElement('div');
+  toast.className = `toast ${tone}`;
+  toast.innerHTML = `
+    <strong class="toast-title">${escapeHtml(title)}</strong>
+    ${body ? `<div class="toast-body">${escapeHtml(body)}</div>` : ''}
+  `;
+  stack.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+  window.setTimeout(() => {
+    toast.classList.remove('visible');
+    window.setTimeout(() => toast.remove(), 180);
+  }, 2600);
+}
+
+async function runOperation(work, successTitle, successBody = '', errorTitle = 'Operation failed') {
+  try {
+    const result = await work();
+    if (successTitle) showToast(successTitle, successBody, 'success');
+    return result;
+  } catch (error) {
+    showToast(errorTitle, error.message || 'Unknown error', 'error');
+    throw error;
+  }
+}
+
 function jsQuote(value) {
   return JSON.stringify(String(value || ''));
 }
@@ -171,12 +199,20 @@ function selectProject(projectPath) {
 }
 
 async function addPinnedProject(projectPath) {
-  await API.send('/api/pinned-projects', 'POST', { path: projectPath });
+  await runOperation(
+    () => API.send('/api/pinned-projects', 'POST', { path: projectPath }),
+    'Project added',
+    projectPath
+  );
   await loadPinnedProjects();
 }
 
 async function removePinnedProject(projectPath) {
-  await API.send('/api/pinned-projects', 'DELETE', { path: projectPath });
+  await runOperation(
+    () => API.send('/api/pinned-projects', 'DELETE', { path: projectPath }),
+    'Project removed',
+    projectPath
+  );
   if (State.projectPath === projectPath) {
     selectGlobal();
   } else {
@@ -599,7 +635,16 @@ function renderSessionDetail() {
 }
 
 function copyResumeCommand(sessionId) {
-  navigator.clipboard?.writeText(`codex resume ${sessionId}`);
+  const command = `codex resume ${sessionId}`;
+  const copyPromise = navigator.clipboard?.writeText
+    ? navigator.clipboard.writeText(command)
+    : Promise.reject(new Error('Clipboard API unavailable'));
+  runOperation(
+    () => copyPromise,
+    'Resume command copied',
+    command,
+    'Copy failed'
+  ).catch(() => {});
 }
 
 async function createSession() {
@@ -607,7 +652,11 @@ async function createSession() {
   if (!title) return;
   const cwd = window.prompt('Working directory', State.projectPath || '/Volumes/Projects');
   if (!cwd) return;
-  const detail = await API.send('/api/sessions', 'POST', { title, cwd });
+  const detail = await runOperation(
+    () => API.send('/api/sessions', 'POST', { title, cwd }),
+    'Session created',
+    title
+  );
   State.activeSessionId = detail?.session?.id || null;
   await loadCurrentView();
 }
@@ -616,13 +665,25 @@ async function renameSession(sessionId) {
   const current = State.sessionDetail?.session?.title || '';
   const next = window.prompt('New session title', current);
   if (!next || next === current) return;
-  await API.send(`/api/sessions/${encodeURIComponent(sessionId)}`, 'PUT', { title: next });
+  await runOperation(
+    () => API.send(`/api/sessions/${encodeURIComponent(sessionId)}`, 'PUT', { title: next }),
+    'Session renamed',
+    next
+  );
   await loadCurrentView();
 }
 
 async function deleteSession(sessionId) {
   if (!window.confirm('Delete this session and its local log file?')) return;
-  await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+  await runOperation(
+    async () => {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return res.json();
+    },
+    'Session deleted',
+    sessionId
+  );
   await loadCurrentView();
 }
 
@@ -672,7 +733,11 @@ function renderProjectConfig() {
 async function saveConfig() {
   const raw = document.getElementById('config-editor')?.value;
   if (typeof raw !== 'string') return;
-  await API.send('/api/config', 'PUT', { raw });
+  await runOperation(
+    () => API.send('/api/config', 'PUT', { raw }),
+    'Config saved',
+    '~/.codex/config.toml'
+  );
   await loadCurrentView();
 }
 
@@ -683,12 +748,16 @@ async function createMcpServer() {
   if (!command) return;
   const argsText = window.prompt('Args (space-separated)', '') || '';
   const cwd = window.prompt('Working directory (optional)', '') || '';
-  await API.send('/api/config/mcp', 'POST', {
-    name,
-    command,
-    args: argsText.split(/\s+/).filter(Boolean),
-    cwd: cwd || undefined
-  });
+  await runOperation(
+    () => API.send('/api/config/mcp', 'POST', {
+      name,
+      command,
+      args: argsText.split(/\s+/).filter(Boolean),
+      cwd: cwd || undefined
+    }),
+    'MCP server created',
+    name
+  );
   await loadCurrentView();
 }
 
@@ -701,18 +770,30 @@ async function editMcpServer(name) {
   if (!command) return;
   const argsText = window.prompt('Args (space-separated)', (server.args || []).join(' ')) || '';
   const cwd = window.prompt('Working directory (optional)', server.cwd || '') || '';
-  await API.send(`/api/config/mcp/${encodeURIComponent(name)}`, 'PUT', {
-    newName,
-    command,
-    args: argsText.split(/\s+/).filter(Boolean),
-    cwd: cwd || undefined
-  });
+  await runOperation(
+    () => API.send(`/api/config/mcp/${encodeURIComponent(name)}`, 'PUT', {
+      newName,
+      command,
+      args: argsText.split(/\s+/).filter(Boolean),
+      cwd: cwd || undefined
+    }),
+    'MCP server updated',
+    newName
+  );
   await loadCurrentView();
 }
 
 async function deleteMcpServer(name) {
   if (!window.confirm(`Delete MCP server "${name}"?`)) return;
-  await fetch(`/api/config/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  await runOperation(
+    async () => {
+      const res = await fetch(`/api/config/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return res.json();
+    },
+    'MCP server deleted',
+    name
+  );
   await loadCurrentView();
 }
 
@@ -720,7 +801,11 @@ async function createConfigProject() {
   const projectPath = window.prompt('Project path');
   if (!projectPath) return;
   const trustLevel = window.prompt('Trust level', 'trusted') || 'trusted';
-  await API.send('/api/config/projects', 'POST', { path: projectPath, trustLevel });
+  await runOperation(
+    () => API.send('/api/config/projects', 'POST', { path: projectPath, trustLevel }),
+    'Trusted project added',
+    projectPath
+  );
   await loadCurrentView();
 }
 
@@ -728,17 +813,29 @@ async function editConfigProject(projectPath) {
   const project = (State.scan?.global?.config?.projects || []).find(item => item.path === projectPath);
   if (!project) return;
   const trustLevel = window.prompt('Trust level', project.trustLevel || 'trusted') || project.trustLevel || 'trusted';
-  await API.send('/api/config/projects', 'PUT', { path: projectPath, trustLevel });
+  await runOperation(
+    () => API.send('/api/config/projects', 'PUT', { path: projectPath, trustLevel }),
+    'Trusted project updated',
+    projectPath
+  );
   await loadCurrentView();
 }
 
 async function deleteConfigProject(projectPath) {
   if (!window.confirm(`Delete trusted project "${projectPath}"?`)) return;
-  await fetch('/api/config/projects', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: projectPath })
-  });
+  await runOperation(
+    async () => {
+      const res = await fetch('/api/config/projects', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: projectPath })
+      });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return res.json();
+    },
+    'Trusted project deleted',
+    projectPath
+  );
   await loadCurrentView();
 }
 
@@ -771,14 +868,18 @@ async function createPlugin() {
   const displayName = window.prompt('Display name', name) || name;
   const description = window.prompt('Description', '') || '';
   const category = window.prompt('Category', 'Custom') || 'Custom';
-  await API.send('/api/plugins', 'POST', {
-    name,
-    displayName,
-    description,
-    category,
-    capabilities: ['Interactive'],
-    defaultPrompt: ['Use this plugin from Codex Map']
-  });
+  await runOperation(
+    () => API.send('/api/plugins', 'POST', {
+      name,
+      displayName,
+      description,
+      category,
+      capabilities: ['Interactive'],
+      defaultPrompt: ['Use this plugin from Codex Map']
+    }),
+    'Plugin created',
+    displayName
+  );
   await loadCurrentView();
 }
 
@@ -790,21 +891,33 @@ async function editPlugin(name) {
   const displayName = window.prompt('Display name', plugin.displayName || plugin.name) || plugin.name;
   const description = window.prompt('Description', plugin.description || '') || '';
   const category = window.prompt('Category', plugin.category || 'Custom') || 'Custom';
-  await API.send(`/api/plugins/${encodeURIComponent(name)}`, 'PUT', {
-    name: newName,
-    displayName,
-    description,
-    category,
-    capabilities: ['Interactive'],
-    defaultPrompt: ['Use this plugin from Codex Map'],
-    version: plugin.version || '0.1.0'
-  });
+  await runOperation(
+    () => API.send(`/api/plugins/${encodeURIComponent(name)}`, 'PUT', {
+      name: newName,
+      displayName,
+      description,
+      category,
+      capabilities: ['Interactive'],
+      defaultPrompt: ['Use this plugin from Codex Map'],
+      version: plugin.version || '0.1.0'
+    }),
+    'Plugin updated',
+    displayName
+  );
   await loadCurrentView();
 }
 
 async function deletePlugin(name) {
   if (!window.confirm(`Delete plugin "${name}"?`)) return;
-  await fetch(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  await runOperation(
+    async () => {
+      const res = await fetch(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return res.json();
+    },
+    'Plugin deleted',
+    name
+  );
   await loadCurrentView();
 }
 
@@ -865,11 +978,15 @@ function toggleRawEdit() {
 async function saveRawFile() {
   const content = document.getElementById('raw-editor')?.value;
   if (typeof content !== 'string') return;
-  await API.send('/api/file', 'PUT', {
-    path: State.rawSelectedPath,
-    content,
-    projectPath: State.mode === 'project' ? State.projectPath : null
-  });
+  await runOperation(
+    () => API.send('/api/file', 'PUT', {
+      path: State.rawSelectedPath,
+      content,
+      projectPath: State.mode === 'project' ? State.projectPath : null
+    }),
+    'File saved',
+    State.rawSelectedPath || ''
+  );
   State.rawFile.content = content;
   State.rawDraft = content;
   State.rawEditMode = false;
@@ -904,6 +1021,7 @@ function highlightCode() {
 function downloadExport() {
   const projectQuery = State.mode === 'project' ? `?project=${encodeURIComponent(State.projectPath)}` : '';
   window.open(`/api/export${projectQuery}`, '_blank');
+  showToast('Export started', 'JSON download opened', 'success');
 }
 
 async function downloadBundle() {
@@ -922,6 +1040,7 @@ async function downloadBundle() {
   a.download = `codex-map-bundle-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  showToast('Bundle ready', a.download, 'success');
 }
 
 async function openBrowser(startPath) {
@@ -1007,15 +1126,28 @@ async function saveSkill() {
 
   const body = { name, content, scope: draft.scope, projectPath: currentSkillProjectPath(draft.scope) };
   if (draft.mode === 'create') {
-    await API.send('/api/skills', 'POST', body);
+    await runOperation(
+      () => API.send('/api/skills', 'POST', body),
+      'Skill created',
+      name
+    );
   } else if (name === draft.originalName) {
-    await API.send(`/api/skills/${encodeURIComponent(draft.originalName)}`, 'PUT', body);
+    await runOperation(
+      () => API.send(`/api/skills/${encodeURIComponent(draft.originalName)}`, 'PUT', body),
+      'Skill updated',
+      name
+    );
   } else {
-    await API.send('/api/skills', 'POST', body);
+    await runOperation(
+      () => API.send('/api/skills', 'POST', body),
+      'Skill renamed',
+      `${draft.originalName} → ${name}`
+    );
     const qs = new URLSearchParams({ scope: draft.scope });
     const projectPath = currentSkillProjectPath(draft.scope);
     if (projectPath) qs.set('projectPath', projectPath);
-    await fetch(`/api/skills/${encodeURIComponent(draft.originalName)}?${qs.toString()}`, { method: 'DELETE' });
+    const res = await fetch(`/api/skills/${encodeURIComponent(draft.originalName)}?${qs.toString()}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
   }
   closeSkillModal();
   await loadCurrentView();
@@ -1027,7 +1159,15 @@ async function deleteSkill() {
   const qs = new URLSearchParams({ scope: draft.scope });
   const projectPath = currentSkillProjectPath(draft.scope);
   if (projectPath) qs.set('projectPath', projectPath);
-  await fetch(`/api/skills/${encodeURIComponent(draft.originalName)}?${qs.toString()}`, { method: 'DELETE' });
+  await runOperation(
+    async () => {
+      const res = await fetch(`/api/skills/${encodeURIComponent(draft.originalName)}?${qs.toString()}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return res.json();
+    },
+    'Skill deleted',
+    draft.originalName
+  );
   closeSkillModal();
   await loadCurrentView();
 }
