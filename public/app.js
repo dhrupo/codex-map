@@ -1,4 +1,5 @@
 const State = {
+  isLoading: true,
   mode: 'global',
   projectPath: '',
   currentTab: 'overview',
@@ -82,38 +83,44 @@ function getCurrentTree() {
 }
 
 async function init() {
+  setLoading(true);
   const savedTheme = localStorage.getItem('codex-map-theme') || 'light';
   applyTheme(savedTheme);
   await loadPinnedProjects();
   await loadCurrentView();
   connectEvents();
+  setLoading(false);
 }
 
 async function loadCurrentView() {
-  const projectQuery = State.mode === 'project' ? `?project=${encodeURIComponent(State.projectPath)}` : '';
-  State.scan = await API.get(`/api/scan${projectQuery}`);
-  State.history = (await API.get(`/api/history${projectQuery}`)).entries || [];
-  State.toolStats = await API.get(`/api/stats/tools${projectQuery}`);
-  State.usageStats = await API.get(`/api/stats/usage${projectQuery}`);
-  State.pluginData = await API.get('/api/plugins');
+  try {
+    const projectQuery = State.mode === 'project' ? `?project=${encodeURIComponent(State.projectPath)}` : '';
+    State.scan = await API.get(`/api/scan${projectQuery}`);
+    State.history = (await API.get(`/api/history${projectQuery}`)).entries || [];
+    State.toolStats = await API.get(`/api/stats/tools${projectQuery}`);
+    State.usageStats = await API.get(`/api/stats/usage${projectQuery}`);
+    State.pluginData = await API.get('/api/plugins');
 
-  if (State.mode === 'project') {
-    State.analysis = await API.get(`/api/analyze?project=${encodeURIComponent(State.projectPath)}`);
-  } else {
-    State.analysis = null;
+    if (State.mode === 'project') {
+      State.analysis = await API.get(`/api/analyze?project=${encodeURIComponent(State.projectPath)}`);
+    } else {
+      State.analysis = null;
+    }
+
+    const sessionRes = await API.get(`/api/sessions${projectQuery}`);
+    State.sessions = sessionRes.sessions || [];
+    if (!State.activeSessionId || !State.sessions.find(item => item.id === State.activeSessionId)) {
+      State.activeSessionId = State.sessions[0]?.id || null;
+    }
+    State.sessionDetail = State.activeSessionId
+      ? await API.get(`/api/sessions/${encodeURIComponent(State.activeSessionId)}`)
+      : null;
+
+    State.configDraft = State.scan?.global?.config?.raw || '';
+    render();
+  } finally {
+    setLoading(false);
   }
-
-  const sessionRes = await API.get(`/api/sessions${projectQuery}`);
-  State.sessions = sessionRes.sessions || [];
-  if (!State.activeSessionId || !State.sessions.find(item => item.id === State.activeSessionId)) {
-    State.activeSessionId = State.sessions[0]?.id || null;
-  }
-  State.sessionDetail = State.activeSessionId
-    ? await API.get(`/api/sessions/${encodeURIComponent(State.activeSessionId)}`)
-    : null;
-
-  State.configDraft = State.scan?.global?.config?.raw || '';
-  render();
 }
 
 async function loadPinnedProjects() {
@@ -234,6 +241,12 @@ function renderHero() {
   ].join('');
 }
 
+function setLoading(isLoading) {
+  State.isLoading = isLoading;
+  document.body.classList.toggle('loading', isLoading);
+  document.getElementById('app-loader')?.classList.toggle('hidden', !isLoading);
+}
+
 function metricCard(label, value) {
   return `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`;
 }
@@ -288,7 +301,6 @@ function renderMap() {
       ${panel('Global', `
         <div class="kv"><span>Skills</span><strong>${formatNumber(connections?.global?.skills?.count || 0)}</strong></div>
         <div class="kv"><span>MCP Servers</span><strong>${formatNumber(connections?.global?.mcp?.count || 0)}</strong></div>
-        <div class="kv"><span>Trusted Projects</span><strong>${formatNumber(connections?.global?.projects?.count || 0)}</strong></div>
         <div class="kv"><span>Plugins</span><strong>${formatNumber(connections?.global?.plugins?.count || 0)}</strong></div>
       `)}
       ${panel('Project', `
@@ -357,43 +369,104 @@ function renderProjectOverview() {
 
 function renderStats() {
   const usage = State.usageStats || { daily: [], topTools: [] };
+  const summary = buildStatsSummary(usage);
   return `
-    <div class="grid two">
-      ${panel('Usage Trend', usage.daily?.length ? usageChart(usage.daily) : '<p class="muted">No recent usage data.</p>')}
+    <div class="stats-dashboard">
+      <div class="stats-summary">
+        ${summary.map((item, index) => `
+          <article class="stat-tile ${index === 0 ? 'emphasis' : ''}">
+            <div class="stat-value">${escapeHtml(item.value)}</div>
+            <div class="stat-label">${escapeHtml(item.label)}</div>
+            ${item.sub ? `<div class="stat-sub">${escapeHtml(item.sub)}</div>` : ''}
+          </article>
+        `).join('')}
+      </div>
+      ${panel('Total Usage', usage.daily?.length ? usageChart(usage.daily) : '<p class="muted">No recent usage data.</p>')}
       ${panel('Top Tools', usage.topTools?.length ? toolChart(usage.topTools) : '<p class="muted">No tool usage data.</p>')}
     </div>
   `;
 }
 
+function buildStatsSummary(usage) {
+  const daily = usage.daily || [];
+  const totalMessages = daily.reduce((sum, row) => sum + (row.prompts || 0), 0);
+  const totalTools = daily.reduce((sum, row) => sum + (row.tools || 0), 0);
+  const totalSessions = daily.reduce((sum, row) => sum + (row.sessions || 0), 0);
+  const activeDays = daily.filter(row => row.prompts || row.sessions || row.tools).length;
+  const longestDay = daily.reduce((best, row) => ((row.prompts || 0) > (best?.prompts || 0) ? row : best), null);
+  const firstDay = daily.find(row => row.prompts || row.sessions || row.tools);
+
+  return [
+    { label: 'Messages', value: formatNumber(totalMessages), sub: 'selected range' },
+    { label: 'Tool Calls', value: formatNumber(totalTools), sub: 'selected range' },
+    { label: 'Sessions', value: formatNumber(totalSessions), sub: 'selected range' },
+    { label: 'Active Days', value: formatNumber(activeDays), sub: usage.period || '' },
+    { label: 'Peak Day', value: formatNumber(longestDay?.prompts || 0), sub: longestDay?.date || '—' },
+    { label: 'First Active', value: firstDay?.date || '—', sub: firstDay ? 'within range' : '' }
+  ];
+}
+
 function usageChart(rows) {
-  const width = 680;
-  const height = 220;
-  const max = Math.max(...rows.map(row => Math.max(row.prompts, row.sessions, 1)), 1);
-  const step = width / Math.max(rows.length, 1);
+  const width = 980;
+  const height = 320;
+  const left = 56;
+  const right = 18;
+  const top = 18;
+  const bottom = 34;
+  const innerWidth = width - left - right;
+  const innerHeight = height - top - bottom;
+  const max = Math.max(...rows.map(row => Math.max(row.prompts, row.sessions, row.tools, 1)), 1);
+  const gridLines = 4;
+  const xStep = rows.length > 1 ? innerWidth / (rows.length - 1) : innerWidth;
+  const yFor = value => top + innerHeight - ((value / max) * innerHeight);
+  const makePath = key => rows.map((row, index) => {
+    const x = left + (index * xStep);
+    const y = yFor(row[key] || 0);
+    return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+  }).join(' ');
+  const promptPath = makePath('prompts');
+  const sessionPath = makePath('sessions');
+  const toolPath = makePath('tools');
+  const areaPath = `${promptPath} L ${left + ((rows.length - 1) * xStep)} ${top + innerHeight} L ${left} ${top + innerHeight} Z`;
   return `
-    <div class="chart-wrap">
-      <div class="chip-row">
-        <span class="chip">Prompts</span>
-        <span class="chip">Sessions</span>
+    <div class="line-chart">
+      <div class="chart-legend">
+        <span><i class="legend-dot prompts"></i>Messages</span>
+        <span><i class="legend-dot sessions"></i>Sessions</span>
+        <span><i class="legend-dot tools"></i>Tool Calls</span>
       </div>
-      <svg viewBox="0 0 ${width} ${height}" class="chart-svg" role="img" aria-label="Usage trend chart">
-        <line x1="0" y1="170" x2="${width}" y2="170" stroke="var(--panel-border)"></line>
-        ${rows.map((row, index) => {
-          const x = index * step + 10;
-          const promptH = (row.prompts / max) * 130;
-          const sessionH = (row.sessions / max) * 130;
-          const bar = Math.max(step / 3, 12);
-          return `
-            <g>
-              <rect x="${x}" y="${170 - promptH}" width="${bar}" height="${promptH}" fill="var(--brand)" rx="6"></rect>
-              <rect x="${x + bar + 6}" y="${170 - sessionH}" width="${bar}" height="${sessionH}" fill="var(--accent)" rx="6"></rect>
-              <text x="${x}" y="198" fill="var(--muted)" font-size="11">${row.date.slice(5)}</text>
-            </g>
-          `;
-        }).join('')}
-      </svg>
+      <div class="chart-surface">
+        <svg viewBox="0 0 ${width} ${height}" class="chart-svg" role="img" aria-label="Total usage over time">
+          ${Array.from({ length: gridLines + 1 }, (_, index) => {
+            const value = Math.round((max / gridLines) * (gridLines - index));
+            const y = top + ((innerHeight / gridLines) * index);
+            return `
+              <g>
+                <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="var(--panel-border)" stroke-width="1"></line>
+                <text x="${left - 10}" y="${y + 4}" text-anchor="end" fill="var(--muted)" font-size="11">${formatNumber(value)}</text>
+              </g>
+            `;
+          }).join('')}
+          <path d="${areaPath}" fill="rgba(102, 220, 194, 0.14)"></path>
+          <path d="${promptPath}" fill="none" stroke="#66dcc2" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="${sessionPath}" fill="none" stroke="#8f62d5" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="${toolPath}" fill="none" stroke="#dd9f68" stroke-width="2" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round"></path>
+          ${rows.map((row, index) => {
+            const x = left + (index * xStep);
+            const promptY = yFor(row.prompts || 0);
+            const sessionY = yFor(row.sessions || 0);
+            return `
+              <g>
+                <circle cx="${x}" cy="${promptY}" r="3.5" fill="#66dcc2"></circle>
+                <circle cx="${x}" cy="${sessionY}" r="3" fill="#8f62d5"></circle>
+                <text x="${x}" y="${height - 10}" text-anchor="middle" fill="var(--muted)" font-size="11">${row.date.slice(5)}</text>
+              </g>
+            `;
+          }).join('')}
+        </svg>
+      </div>
       <div class="chart-list">
-        ${rows.map(row => `<div class="kv"><span>${escapeHtml(row.date)}</span><strong>${row.prompts} prompts · ${row.sessions} sessions · ${row.tools} tools</strong></div>`).join('')}
+        ${rows.map(row => `<div class="kv"><span>${escapeHtml(row.date)}</span><strong>${formatNumber(row.prompts)} messages · ${formatNumber(row.sessions)} sessions · ${formatNumber(row.tools)} tools</strong></div>`).join('')}
       </div>
     </div>
   `;
@@ -495,28 +568,32 @@ function renderSessionDetail() {
     .map(([name, count]) => `<span class="chip">${escapeHtml(name)} ${count}</span>`).join('');
 
   return `
-    <div class="eyebrow">Session Detail</div>
-    <h2>${escapeHtml(detail.session.title || '(untitled session)')}</h2>
-    <div class="session-meta">
-      <div class="kv"><span>Session</span><strong>${escapeHtml(detail.session.id)}</strong></div>
-      <div class="kv"><span>Path</span><strong>${escapeHtml(detail.session.cwd || '—')}</strong></div>
-      <div class="kv"><span>Provider</span><strong>${escapeHtml(detail.session.modelProvider || '—')}</strong></div>
-      <div class="kv"><span>Updated</span><strong>${escapeHtml(formatDate(detail.session.updatedAt))}</strong></div>
-    </div>
-    <div class="panel-actions-inline">
-      <button class="btn btn-small" onclick='copyResumeCommand(${jsQuote(detail.session.id)})'>Copy resume command</button>
-      <button class="btn btn-small" onclick='renameSession(${jsQuote(detail.session.id)})'>Rename</button>
-      <button class="ghost" onclick='deleteSession(${jsQuote(detail.session.id)})'>Delete</button>
-      <span class="chip-row">${tools || '<span class="chip">No tool events</span>'}</span>
-    </div>
-    <div class="timeline">
-      ${(detail.timeline || []).map(item => `
-        <article class="timeline-item ${item.kind}">
-          <small>${escapeHtml(formatDate(item.timestamp))}</small>
-          <strong>${escapeHtml(item.title)}</strong>
-          <pre>${escapeHtml(item.body || '')}</pre>
-        </article>
-      `).join('')}
+    <div class="session-detail">
+      <div class="eyebrow">Session Detail</div>
+      <h2>${escapeHtml(detail.session.title || '(untitled session)')}</h2>
+      <div class="session-meta">
+        <div class="kv"><span>Session</span><strong>${escapeHtml(detail.session.id)}</strong></div>
+        <div class="kv"><span>Provider</span><strong>${escapeHtml(detail.session.modelProvider || '—')}</strong></div>
+        <div class="kv"><span>Path</span><strong>${escapeHtml(detail.session.cwd || '—')}</strong></div>
+        <div class="kv"><span>Updated</span><strong>${escapeHtml(formatDate(detail.session.updatedAt))}</strong></div>
+      </div>
+      <div class="panel-actions-inline">
+        <button class="btn btn-small" onclick='copyResumeCommand(${jsQuote(detail.session.id)})'>Copy resume command</button>
+        <button class="btn btn-small" onclick='renameSession(${jsQuote(detail.session.id)})'>Rename</button>
+        <button class="ghost" onclick='deleteSession(${jsQuote(detail.session.id)})'>Delete</button>
+      </div>
+      <div class="chip-row" style="margin:12px 0 16px;">
+        ${tools || '<span class="chip">No tool events</span>'}
+      </div>
+      <div class="timeline">
+        ${(detail.timeline || []).map(item => `
+          <article class="timeline-item ${item.kind}">
+            <small>${escapeHtml(formatDate(item.timestamp))}</small>
+            <strong>${escapeHtml(item.title)}</strong>
+            <pre>${escapeHtml(item.body || '')}</pre>
+          </article>
+        `).join('')}
+      </div>
     </div>
   `;
 }
@@ -565,18 +642,6 @@ function renderGlobalConfig() {
         <div class="kv"><span>MCP Servers</span><strong>${formatNumber(config.mcpServers?.length || 0)}</strong></div>
         <div class="kv"><span>Profiles</span><strong>${formatNumber(config.profiles?.length || 0)}</strong></div>
       `, `<button class="btn btn-small" onclick='saveConfig()'>Save</button>`)}
-      ${panel('Trusted Projects', config.projects?.length ? config.projects.map(project => `
-        <article class="mini-card">
-          <strong>${escapeHtml(project.path)}</strong>
-          <p>${escapeHtml(project.trustLevel || 'unlisted')}</p>
-          <div class="chip-row">
-            <button class="btn btn-small" onclick='editConfigProject(${jsQuote(project.path)})'>Edit</button>
-            <button class="ghost" onclick='deleteConfigProject(${jsQuote(project.path)})'>Delete</button>
-          </div>
-        </article>
-      `).join('') : '<p class="muted">No trusted projects configured.</p>', `<button class="btn btn-small" onclick='createConfigProject()'>Add project</button>`)}
-    </div>
-    <div class="grid two">
       ${panel('MCP Servers', config.mcpServers?.length ? config.mcpServers.map(server => `
         <article class="mini-card">
           <strong>${escapeHtml(server.name)}</strong>
