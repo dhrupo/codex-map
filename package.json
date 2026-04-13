@@ -1,6 +1,6 @@
 {
   "name": "codex-map",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Visual dashboard for inspecting and mapping your Codex CLI setup",
   "main": "server.js",
   "bin": {
@@ -11,6 +11,7 @@
     "dev": "node --watch server.js"
   },
   "files": [
+    "AGENTS.md",
     "bin/",
     "public/",
     "server.js",
