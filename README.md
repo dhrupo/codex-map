@@ -30,6 +30,21 @@ npm install
 npm run dev
 ```
 
+## Screenshots
+
+### Global Dashboard
+
+![Overview](screenshots/00-overview.png)
+![Stats](screenshots/01-stats.png)
+![Skills](screenshots/02-skills.png)
+![Plugins](screenshots/05-plugins.png)
+
+### Project View
+
+![Project Map](screenshots/10-project-map.png)
+![Project Stats](screenshots/12-project-stats.png)
+![Project Skills](screenshots/13-project-skills.png)
+
 ## What It Reads
 
 - `~/.codex/config.toml`
