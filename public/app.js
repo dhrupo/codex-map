@@ -99,6 +99,24 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
 
+function formatCostUsd(value) {
+  const amount = Number(value || 0);
+  const digits = amount >= 1 ? 2 : amount >= 0.01 ? 3 : 4;
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  }).format(amount);
+}
+
+function formatShortNumber(value) {
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1
+  }).format(Number(value || 0));
+}
+
 function currentTabs() {
   return State.mode === 'project' ? TABS_PROJECT : TABS_GLOBAL;
 }
@@ -129,7 +147,9 @@ function statsPresetRange(preset) {
   const end = new Date(now);
   let start = new Date(now);
 
-  if (preset === '7d') {
+  if (preset === 'today') {
+    start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+  } else if (preset === '7d') {
     start = new Date(end.getTime() - (6 * 24 * 60 * 60 * 1000));
   } else if (preset === '30d') {
     start = new Date(end.getTime() - (29 * 24 * 60 * 60 * 1000));
@@ -146,6 +166,16 @@ function statsPresetRange(preset) {
     from: isoDateOnly(start),
     to: isoDateOnly(end)
   };
+}
+
+function getActiveStatsPreset() {
+  const range = State.statsRange;
+  if (!range?.from || !range?.to) return null;
+  const presets = ['today', '7d', '30d', 'month', '90d'];
+  return presets.find(preset => {
+    const value = statsPresetRange(preset);
+    return value.from === range.from && value.to === range.to;
+  }) || null;
 }
 
 async function init() {
@@ -266,7 +296,7 @@ async function removePinnedProject(projectPath) {
 
 async function addPath() {
   const input = document.getElementById('path-input');
-  const value = input.value.trim();
+  const value = input?.value?.trim();
   if (!value) return;
   await addPinnedProject(value);
   input.value = '';
@@ -448,8 +478,9 @@ function renderProjectOverview() {
 }
 
 function renderStats() {
-  const usage = State.usageStats || { daily: [], topTools: [] };
+  const usage = State.usageStats || { daily: [], topTools: [], topModels: [], totals: null, byTaskType: [], byProject: [], byTool: [], byMcpServer: [] };
   const summary = buildStatsSummary(usage);
+  const activePreset = getActiveStatsPreset();
   return `
     <div class="stats-dashboard">
       ${panel('Date Range', `
@@ -468,43 +499,65 @@ function renderStats() {
           </div>
         </div>
         <div class="stats-presets">
-          <button class="ghost" onclick="applyStatsPreset('7d')">7D</button>
-          <button class="ghost" onclick="applyStatsPreset('30d')">30D</button>
-          <button class="ghost" onclick="applyStatsPreset('90d')">90D</button>
-          <button class="ghost" onclick="applyStatsPreset('month')">This Month</button>
+          <button class="ghost ${activePreset === 'today' ? 'active' : ''}" onclick="applyStatsPreset('today')">Today</button>
+          <button class="ghost ${activePreset === '7d' ? 'active' : ''}" onclick="applyStatsPreset('7d')">Week</button>
+          <button class="ghost ${activePreset === '30d' ? 'active' : ''}" onclick="applyStatsPreset('30d')">Month</button>
+          <button class="ghost ${activePreset === 'month' ? 'active' : ''}" onclick="applyStatsPreset('month')">This Month</button>
+          <button class="ghost ${activePreset === '90d' ? 'active' : ''}" onclick="applyStatsPreset('90d')">90D</button>
           <button class="ghost" onclick="applyStatsPreset('all')">All Time</button>
         </div>
       `)}
       <div class="stats-summary">
         ${summary.map((item, index) => `
           <article class="stat-tile ${index === 0 ? 'emphasis' : ''}">
-            <div class="stat-value">${escapeHtml(item.value)}</div>
+            <div class="stat-value ${String(item.value).length > 12 ? 'compact' : ''}">${escapeHtml(item.value)}</div>
             <div class="stat-label">${escapeHtml(item.label)}</div>
             ${item.sub ? `<div class="stat-sub">${escapeHtml(item.sub)}</div>` : ''}
           </article>
         `).join('')}
       </div>
-      ${panel('Total Usage', usage.daily?.length ? usageChart(usage.daily) : '<p class="muted">No recent usage data.</p>')}
-      ${panel('Top Tools', usage.topTools?.length ? toolChart(usage.topTools) : '<p class="muted">No tool usage data.</p>')}
+      ${panel('Daily Token Burn', usage.daily?.length ? burnChart(usage.daily) : '<p class="muted">No recent usage data.</p>')}
+      ${panel('Daily Activity', usage.daily?.length ? dailyActivityChart(usage.daily) : '<p class="muted">No recent usage data.</p>')}
+      <div class="grid two">
+        ${panel('Cost By Task Type', usage.byTaskType?.length ? breakdownChart(usage.byTaskType, 'task') : '<p class="muted">No task activity data.</p>')}
+        ${panel('Cost By Project', usage.byProject?.length ? breakdownChart(usage.byProject, 'project') : '<p class="muted">No project activity data.</p>')}
+      </div>
+      <div class="grid two">
+        ${panel('Cost By Model', usage.topModels?.length ? breakdownChart(usage.topModels, 'model') : '<p class="muted">No model usage data.</p>')}
+        ${panel('Cost By MCP Server', usage.byMcpServer?.length ? breakdownChart(usage.byMcpServer, 'mcp') : '<p class="muted">No MCP usage data.</p>')}
+      </div>
+      <div class="grid two">
+        ${panel('Cost By Tool', usage.byTool?.length ? breakdownChart(usage.byTool, 'tool') : '<p class="muted">No tool usage data.</p>')}
+        ${panel('Tool Calls', usage.topTools?.length ? toolChart(usage.topTools) : '<p class="muted">No tool usage data.</p>')}
+      </div>
+      ${panel('Activity Log', usage.daily?.length ? activityBreakdown(usage.daily) : '<p class="muted">No recent usage data.</p>')}
     </div>
   `;
 }
 
 function buildStatsSummary(usage) {
   const daily = usage.daily || [];
-  const totalMessages = daily.reduce((sum, row) => sum + (row.prompts || 0), 0);
-  const totalTools = daily.reduce((sum, row) => sum + (row.tools || 0), 0);
-  const totalSessions = daily.reduce((sum, row) => sum + (row.sessions || 0), 0);
+  const totals = usage.totals || {};
+  const totalMessages = totals.prompts ?? daily.reduce((sum, row) => sum + (row.prompts || 0), 0);
+  const totalTools = totals.tools ?? daily.reduce((sum, row) => sum + (row.tools || 0), 0);
+  const totalSessions = totals.sessions ?? daily.reduce((sum, row) => sum + (row.sessions || 0), 0);
   const activeDays = daily.filter(row => row.prompts || row.sessions || row.tools).length;
-  const longestDay = daily.reduce((best, row) => ((row.prompts || 0) > (best?.prompts || 0) ? row : best), null);
+  const longestDay = daily.reduce((best, row) => ((row.totalTokens || 0) > (best?.totalTokens || 0) ? row : best), null);
   const firstDay = daily.find(row => row.prompts || row.sessions || row.tools);
 
   return [
+    { label: 'Estimated Cost', value: formatCostUsd(totals.estimatedCostUsd || 0), sub: 'selected range' },
+    { label: 'Total Tokens', value: formatNumber(totals.totalTokens || 0), sub: `${formatShortNumber(totals.totalTokens || 0)} total` },
+    { label: 'Input Tokens', value: formatNumber(totals.inputTokens || 0), sub: 'uncached input only' },
+    { label: 'Cached Tokens', value: formatNumber(totals.cachedInputTokens || 0), sub: 'cache reads' },
+    { label: 'Output Tokens', value: formatNumber(totals.outputTokens || 0), sub: 'assistant output' },
+    { label: 'Reasoning Tokens', value: formatNumber(totals.reasoningTokens || 0), sub: 'hidden reasoning output' },
     { label: 'Messages', value: formatNumber(totalMessages), sub: 'selected range' },
     { label: 'Tool Calls', value: formatNumber(totalTools), sub: 'selected range' },
     { label: 'Sessions', value: formatNumber(totalSessions), sub: 'selected range' },
+    { label: 'Turns', value: formatNumber(totals.turns || 0), sub: 'classified work units' },
     { label: 'Active Days', value: formatNumber(activeDays), sub: usage.period || '' },
-    { label: 'Peak Day', value: formatNumber(longestDay?.prompts || 0), sub: longestDay?.date || '—' },
+    { label: 'Peak Burn', value: formatNumber(longestDay?.totalTokens || 0), sub: longestDay?.date || '—' },
     { label: 'First Active', value: firstDay?.date || '—', sub: firstDay ? 'within range' : '' }
   ];
 }
@@ -549,7 +602,7 @@ async function applyStatsPreset(preset) {
   );
 }
 
-function usageChart(rows) {
+function burnChart(rows) {
   const width = 980;
   const height = 320;
   const left = 56;
@@ -558,7 +611,13 @@ function usageChart(rows) {
   const bottom = 34;
   const innerWidth = width - left - right;
   const innerHeight = height - top - bottom;
-  const max = Math.max(...rows.map(row => Math.max(row.prompts, row.sessions, row.tools, 1)), 1);
+  const max = Math.max(...rows.map(row => Math.max(
+    row.totalTokens || 0,
+    row.inputTokens || 0,
+    row.cachedInputTokens || 0,
+    (row.outputTokens || 0) + (row.reasoningTokens || 0),
+    1
+  )), 1);
   const gridLines = 4;
   const xStep = rows.length > 1 ? innerWidth / (rows.length - 1) : innerWidth;
   const yFor = value => top + innerHeight - ((value / max) * innerHeight);
@@ -567,19 +626,25 @@ function usageChart(rows) {
     const y = yFor(row[key] || 0);
     return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
   }).join(' ');
-  const promptPath = makePath('prompts');
-  const sessionPath = makePath('sessions');
-  const toolPath = makePath('tools');
-  const areaPath = `${promptPath} L ${left + ((rows.length - 1) * xStep)} ${top + innerHeight} L ${left} ${top + innerHeight} Z`;
+  const totalPath = makePath('totalTokens');
+  const inputPath = makePath('inputTokens');
+  const cachedPath = makePath('cachedInputTokens');
+  const outputPath = rows.map((row, index) => {
+    const x = left + (index * xStep);
+    const y = yFor((row.outputTokens || 0) + (row.reasoningTokens || 0));
+    return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+  }).join(' ');
+  const areaPath = `${totalPath} L ${left + ((rows.length - 1) * xStep)} ${top + innerHeight} L ${left} ${top + innerHeight} Z`;
   return `
     <div class="line-chart">
       <div class="chart-legend">
-        <span><i class="legend-dot prompts"></i>Messages</span>
-        <span><i class="legend-dot sessions"></i>Sessions</span>
-        <span><i class="legend-dot tools"></i>Tool Calls</span>
+        <span><i class="legend-dot total"></i>Total</span>
+        <span><i class="legend-dot prompts"></i>Input</span>
+        <span><i class="legend-dot sessions"></i>Cached</span>
+        <span><i class="legend-dot tools"></i>Output + Reasoning</span>
       </div>
       <div class="chart-surface">
-        <svg viewBox="0 0 ${width} ${height}" class="chart-svg" role="img" aria-label="Total usage over time">
+        <svg viewBox="0 0 ${width} ${height}" class="chart-svg" role="img" aria-label="Token burn over time">
           ${Array.from({ length: gridLines + 1 }, (_, index) => {
             const value = Math.round((max / gridLines) * (gridLines - index));
             const y = top + ((innerHeight / gridLines) * index);
@@ -591,17 +656,16 @@ function usageChart(rows) {
             `;
           }).join('')}
           <path d="${areaPath}" fill="rgba(102, 220, 194, 0.14)"></path>
-          <path d="${promptPath}" fill="none" stroke="#66dcc2" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"></path>
-          <path d="${sessionPath}" fill="none" stroke="#8f62d5" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
-          <path d="${toolPath}" fill="none" stroke="#dd9f68" stroke-width="2" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="${totalPath}" fill="none" stroke="#1f9d84" stroke-width="3.25" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="${inputPath}" fill="none" stroke="#66dcc2" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="${cachedPath}" fill="none" stroke="#8f62d5" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round"></path>
+          <path d="${outputPath}" fill="none" stroke="#dd9f68" stroke-width="2" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round"></path>
           ${rows.map((row, index) => {
             const x = left + (index * xStep);
-            const promptY = yFor(row.prompts || 0);
-            const sessionY = yFor(row.sessions || 0);
+            const totalY = yFor(row.totalTokens || 0);
             return `
               <g>
-                <circle cx="${x}" cy="${promptY}" r="3.5" fill="#66dcc2"></circle>
-                <circle cx="${x}" cy="${sessionY}" r="3" fill="#8f62d5"></circle>
+                <circle cx="${x}" cy="${totalY}" r="3.5" fill="#1f9d84"></circle>
                 <text x="${x}" y="${height - 10}" text-anchor="middle" fill="var(--muted)" font-size="11">${row.date.slice(5)}</text>
               </g>
             `;
@@ -609,8 +673,82 @@ function usageChart(rows) {
         </svg>
       </div>
       <div class="chart-list">
-        ${rows.map(row => `<div class="kv"><span>${escapeHtml(row.date)}</span><strong>${formatNumber(row.prompts)} messages · ${formatNumber(row.sessions)} sessions · ${formatNumber(row.tools)} tools</strong></div>`).join('')}
+        ${rows.map(row => `<div class="kv"><span>${escapeHtml(row.date)}</span><strong>${formatNumber(row.totalTokens)} tokens · ${formatCostUsd(row.estimatedCostUsd || 0)}</strong></div>`).join('')}
       </div>
+    </div>
+  `;
+}
+
+function modelBurnChart(rows) {
+  const max = Math.max(...rows.map(row => row.totalTokens || 0), 1);
+  return `
+    <div class="chart-list">
+      ${rows.map(row => `
+        <div class="tool-row tool-row-wide">
+          <span>${escapeHtml(row.name)}</span>
+          <div class="tool-bar"><i style="width:${((row.totalTokens || 0) / max) * 100}%"></i></div>
+          <strong>${formatNumber(row.totalTokens || 0)} tokens</strong>
+          <span class="muted">${formatCostUsd(row.estimatedCostUsd || 0)} · ${formatNumber(row.calls || 0)} updates</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function dailyActivityChart(rows) {
+  const maxCost = Math.max(...rows.map(row => row.estimatedCostUsd || 0), 0.01);
+  return `
+    <div class="chart-list">
+      ${rows.map(row => `
+        <div class="tool-row tool-row-wide">
+          <span>${escapeHtml(row.date)}</span>
+          <div class="tool-bar"><i style="width:${((row.estimatedCostUsd || 0) / maxCost) * 100}%"></i></div>
+          <strong>${formatCostUsd(row.estimatedCostUsd || 0)}</strong>
+          <span class="muted">${formatNumber(row.turns || 0)} turns · ${formatNumber(row.calls || 0)} token updates</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function breakdownChart(rows, kind) {
+  const maxCost = Math.max(...rows.map(row => row.estimatedCostUsd || 0), 0.01);
+  return `
+    <div class="chart-list">
+      ${rows.map(row => `
+        <div class="tool-row tool-row-wide">
+          <span>${escapeHtml(breakdownLabel(row.name, kind))}</span>
+          <div class="tool-bar"><i style="width:${((row.estimatedCostUsd || 0) / maxCost) * 100}%"></i></div>
+          <strong>${formatCostUsd(row.estimatedCostUsd || 0)}</strong>
+          <span class="muted">${formatNumber(row.totalTokens || 0)} tokens · ${formatNumber(row.calls || 0)} calls${row.turns ? ` · ${formatNumber(row.turns)} turns` : ''}${row.sessions ? ` · ${formatNumber(row.sessions)} sessions` : ''}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function breakdownLabel(name, kind) {
+  if (kind === 'project') {
+    return name.split('/').pop() || name;
+  }
+  if (kind === 'task') {
+    return name
+      .split(/[\/_-]/g)
+      .map(part => part ? part[0].toUpperCase() + part.slice(1) : part)
+      .join(' ');
+  }
+  return name;
+}
+
+function activityBreakdown(rows) {
+  return `
+    <div class="chart-list">
+      ${rows.map(row => `
+        <div class="kv">
+          <span>${escapeHtml(row.date)}</span>
+          <strong>${formatNumber(row.prompts || 0)} messages · ${formatNumber(row.sessions || 0)} sessions · ${formatNumber(row.tools || 0)} tools · ${formatNumber(row.totalTokens || 0)} tokens · ${formatCostUsd(row.estimatedCostUsd || 0)}</strong>
+        </div>
+      `).join('')}
     </div>
   `;
 }

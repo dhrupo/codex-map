@@ -23,6 +23,42 @@ const PLUGINS_ROOT = path.join(PLUGINS_CACHE_DIR, 'plugins');
 const MARKETPLACE_PATH = path.join(PLUGINS_CACHE_DIR, '.agents', 'plugins', 'marketplace.json');
 const MAX_FILE_BYTES = 512 * 1024;
 const TREE_SKIP_DIRS = new Set(['.git', 'cache', 'log', 'logs', '.tmp', 'tmp', 'sqlite', 'vendor_imports']);
+const MODEL_PRICING = {
+  'gpt-5': { input: 2.5e-6, output: 10e-6, cacheRead: 1.25e-6 },
+  'gpt-5.3-codex': { input: 2.5e-6, output: 10e-6, cacheRead: 1.25e-6 },
+  'gpt-5.4': { input: 2.5e-6, output: 10e-6, cacheRead: 1.25e-6 },
+  'gpt-5.4-mini': { input: 0.4e-6, output: 1.6e-6, cacheRead: 0.2e-6 },
+  'gpt-4o': { input: 2.5e-6, output: 10e-6, cacheRead: 1.25e-6 },
+  'gpt-4o-mini': { input: 0.15e-6, output: 0.6e-6, cacheRead: 0.075e-6 }
+};
+const TOOL_DISPLAY_NAMES = {
+  exec_command: 'Bash',
+  read_file: 'Read',
+  write_file: 'Edit',
+  apply_patch: 'Edit',
+  apply_diff: 'Edit',
+  read_dir: 'Glob',
+  spawn_agent: 'Agent',
+  wait_agent: 'Agent',
+  close_agent: 'Agent'
+};
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'apply_patch', 'write_file']);
+const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'read_file', 'read_dir']);
+const BASH_TOOLS = new Set(['Bash', 'exec_command']);
+const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList', 'TaskOutput', 'TaskStop', 'TodoWrite']);
+const SEARCH_TOOLS = new Set(['WebSearch', 'WebFetch', 'ToolSearch']);
+const TEST_PATTERNS = /\b(test|pytest|vitest|jest|mocha|spec|coverage|npm\s+test|npx\s+vitest|npx\s+jest)\b/i;
+const GIT_PATTERNS = /\bgit\s+(push|pull|commit|merge|rebase|checkout|branch|stash|log|diff|status|add|reset|cherry-pick|tag)\b/i;
+const BUILD_PATTERNS = /\b(npm\s+run\s+build|npm\s+publish|pip\s+install|docker|deploy|make\s+build|npm\s+run\s+dev|npm\s+start|pm2|systemctl|brew|cargo\s+build)\b/i;
+const INSTALL_PATTERNS = /\b(npm\s+install|pip\s+install|brew\s+install|apt\s+install|cargo\s+add)\b/i;
+const DEBUG_KEYWORDS = /\b(fix|bug|error|broken|failing|crash|issue|debug|traceback|exception|stack\s*trace|not\s+working|wrong|unexpected|status\s+code|404|500|401|403)\b/i;
+const FEATURE_KEYWORDS = /\b(add|create|implement|new|build|feature|introduce|set\s*up|scaffold|generate|make\s+(?:a|me|the)|write\s+(?:a|me|the))\b/i;
+const REFACTOR_KEYWORDS = /\b(refactor|clean\s*up|rename|reorganize|simplify|extract|restructure|move|migrate|split)\b/i;
+const BRAINSTORM_KEYWORDS = /\b(brainstorm|idea|what\s+if|explore|think\s+about|approach|strategy|design|consider|how\s+should|what\s+would|opinion|suggest|recommend)\b/i;
+const RESEARCH_KEYWORDS = /\b(research|investigate|look\s+into|find\s+out|check|search|analyze|review|understand|explain|how\s+does|what\s+is|show\s+me|list|compare)\b/i;
+const FILE_PATTERNS = /\.(py|js|ts|tsx|jsx|json|yaml|yml|toml|sql|sh|go|rs|java|rb|php|css|html|md|csv|xml)\b/i;
+const SCRIPT_PATTERNS = /\b(run\s+\S+\.\w+|execute|scrip?t|curl|api\s+\S+|endpoint|request\s+url|fetch\s+\S+|query|database|db\s+\S+)\b/i;
+const URL_PATTERN = /https?:\/\/\S+/i;
 
 const cache = new Map();
 const sseClients = new Set();
@@ -113,6 +149,274 @@ function wordCount(text) {
 
 function ensureArray(value) {
   return Array.isArray(value) ? value : value == null ? [] : [value];
+}
+
+function emptyTokenUsage() {
+  return {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+    estimatedCostUsd: 0
+  };
+}
+
+function mergeTokenUsage(target, delta) {
+  target.inputTokens += delta.inputTokens || 0;
+  target.cachedInputTokens += delta.cachedInputTokens || 0;
+  target.outputTokens += delta.outputTokens || 0;
+  target.reasoningTokens += delta.reasoningTokens || 0;
+  target.totalTokens += delta.totalTokens || 0;
+  target.estimatedCostUsd += delta.estimatedCostUsd || 0;
+  return target;
+}
+
+function canonicalModelName(model) {
+  return String(model || '')
+    .trim()
+    .replace(/@.*$/, '')
+    .replace(/-\d{8}$/, '');
+}
+
+function getModelPricing(model) {
+  const canonical = canonicalModelName(model);
+  if (MODEL_PRICING[canonical]) return MODEL_PRICING[canonical];
+  for (const [name, pricing] of Object.entries(MODEL_PRICING)) {
+    if (canonical === name || canonical.startsWith(`${name}-`)) return pricing;
+  }
+  return null;
+}
+
+function estimateUsageCostUsd(model, usage) {
+  const pricing = getModelPricing(model);
+  if (!pricing) return 0;
+  return (
+    ((usage.inputTokens || 0) * pricing.input) +
+    (((usage.outputTokens || 0) + (usage.reasoningTokens || 0)) * pricing.output) +
+    ((usage.cachedInputTokens || 0) * pricing.cacheRead)
+  );
+}
+
+function resolveTokenModel(row, state) {
+  const current = row?.payload?.info?.model || row?.payload?.info?.model_name || row?.payload?.model || state.turnModel || state.sessionModel || 'gpt-5';
+  return canonicalModelName(current) || 'gpt-5';
+}
+
+function createBreakdownEntry(name) {
+  return {
+    name,
+    calls: 0,
+    turns: 0,
+    sessions: 0,
+    ...emptyTokenUsage()
+  };
+}
+
+function normalizeToolName(name) {
+  if (!name) return null;
+  if (name.startsWith('mcp__')) return name;
+  return TOOL_DISPLAY_NAMES[name] || name;
+}
+
+function mcpServerName(toolName) {
+  if (!toolName || !toolName.startsWith('mcp__')) return null;
+  return toolName.split('__')[1] || toolName;
+}
+
+function categorizeConversation(userMessage) {
+  if (BRAINSTORM_KEYWORDS.test(userMessage)) return 'brainstorming';
+  if (RESEARCH_KEYWORDS.test(userMessage)) return 'exploration';
+  if (DEBUG_KEYWORDS.test(userMessage)) return 'debugging';
+  if (FEATURE_KEYWORDS.test(userMessage)) return 'feature';
+  if (FILE_PATTERNS.test(userMessage)) return 'coding';
+  if (SCRIPT_PATTERNS.test(userMessage)) return 'coding';
+  if (URL_PATTERN.test(userMessage)) return 'exploration';
+  return 'conversation';
+}
+
+function refineCategory(category, userMessage) {
+  if (category === 'coding') {
+    if (DEBUG_KEYWORDS.test(userMessage)) return 'debugging';
+    if (REFACTOR_KEYWORDS.test(userMessage)) return 'refactoring';
+    if (FEATURE_KEYWORDS.test(userMessage)) return 'feature';
+    return 'coding';
+  }
+  if (category === 'exploration') {
+    if (DEBUG_KEYWORDS.test(userMessage)) return 'debugging';
+    return 'exploration';
+  }
+  return category;
+}
+
+function classifyUsageTurn(turn) {
+  const tools = Object.keys(turn.toolCounts || {});
+  if (!tools.length) return categorizeConversation(turn.userMessage || '');
+
+  if (tools.includes('Agent')) return 'delegation';
+  if (tools.includes('EnterPlanMode') || tools.some(tool => TASK_TOOLS.has(tool))) return 'planning';
+
+  const hasEdits = tools.some(tool => EDIT_TOOLS.has(tool));
+  const hasReads = tools.some(tool => READ_TOOLS.has(tool));
+  const hasBash = tools.some(tool => BASH_TOOLS.has(tool));
+  const hasSearch = tools.some(tool => SEARCH_TOOLS.has(tool));
+  const hasMcp = tools.some(tool => tool.startsWith('mcp__'));
+
+  if (hasBash && !hasEdits) {
+    const text = turn.userMessage || '';
+    if (TEST_PATTERNS.test(text)) return 'testing';
+    if (GIT_PATTERNS.test(text)) return 'git';
+    if (BUILD_PATTERNS.test(text) || INSTALL_PATTERNS.test(text)) return 'build/deploy';
+  }
+
+  if (hasEdits) return refineCategory('coding', turn.userMessage || '');
+  if (hasBash && hasReads) return refineCategory('exploration', turn.userMessage || '');
+  if (hasBash) return refineCategory('coding', turn.userMessage || '');
+  if (hasSearch || hasMcp) return refineCategory('exploration', turn.userMessage || '');
+  if (hasReads) return refineCategory('exploration', turn.userMessage || '');
+
+  return categorizeConversation(turn.userMessage || '');
+}
+
+function createUsageTurn() {
+  return {
+    userMessage: '',
+    timestamp: null,
+    tokenUpdates: 0,
+    toolCounts: {},
+    mcpCounts: {},
+    ...emptyTokenUsage()
+  };
+}
+
+function addTurnTool(turn, rawName) {
+  const name = normalizeToolName(rawName);
+  if (!name) return;
+  turn.toolCounts[name] = (turn.toolCounts[name] || 0) + 1;
+  const server = mcpServerName(name);
+  if (server) turn.mcpCounts[server] = (turn.mcpCounts[server] || 0) + 1;
+}
+
+function finalizeUsageTurn(turn, session, totals) {
+  const toolNames = Object.keys(turn.toolCounts);
+  const hasActivity = turn.totalTokens || turn.estimatedCostUsd || toolNames.length || turn.userMessage;
+  if (!hasActivity) return;
+
+  const category = classifyUsageTurn(turn);
+  if (!totals.byTaskType[category]) totals.byTaskType[category] = createBreakdownEntry(category);
+  totals.byTaskType[category].turns += 1;
+  totals.byTaskType[category].calls += turn.tokenUpdates || 0;
+  mergeTokenUsage(totals.byTaskType[category], turn);
+
+  const projectName = session.cwd || '(unknown)';
+  if (!totals.byProject[projectName]) {
+    totals.byProject[projectName] = createBreakdownEntry(projectName);
+    totals.byProject[projectName].sessions = 1;
+  }
+  totals.byProject[projectName].turns += 1;
+  totals.byProject[projectName].calls += turn.tokenUpdates || 0;
+  mergeTokenUsage(totals.byProject[projectName], turn);
+
+  const toolTotal = Object.values(turn.toolCounts).reduce((sum, count) => sum + count, 0);
+  if (toolTotal) {
+    for (const [toolName, count] of Object.entries(turn.toolCounts)) {
+      if (!totals.byTool[toolName]) totals.byTool[toolName] = createBreakdownEntry(toolName);
+      totals.byTool[toolName].calls += count;
+      totals.byTool[toolName].turns += 1;
+      mergeTokenUsage(totals.byTool[toolName], {
+        inputTokens: (turn.inputTokens * count) / toolTotal,
+        cachedInputTokens: (turn.cachedInputTokens * count) / toolTotal,
+        outputTokens: (turn.outputTokens * count) / toolTotal,
+        reasoningTokens: (turn.reasoningTokens * count) / toolTotal,
+        totalTokens: (turn.totalTokens * count) / toolTotal,
+        estimatedCostUsd: (turn.estimatedCostUsd * count) / toolTotal
+      });
+    }
+  }
+
+  const mcpTotal = Object.values(turn.mcpCounts).reduce((sum, count) => sum + count, 0);
+  if (mcpTotal) {
+    for (const [serverName, count] of Object.entries(turn.mcpCounts)) {
+      if (!totals.byMcpServer[serverName]) totals.byMcpServer[serverName] = createBreakdownEntry(serverName);
+      totals.byMcpServer[serverName].calls += count;
+      totals.byMcpServer[serverName].turns += 1;
+      mergeTokenUsage(totals.byMcpServer[serverName], {
+        inputTokens: (turn.inputTokens * count) / mcpTotal,
+        cachedInputTokens: (turn.cachedInputTokens * count) / mcpTotal,
+        outputTokens: (turn.outputTokens * count) / mcpTotal,
+        reasoningTokens: (turn.reasoningTokens * count) / mcpTotal,
+        totalTokens: (turn.totalTokens * count) / mcpTotal,
+        estimatedCostUsd: (turn.estimatedCostUsd * count) / mcpTotal
+      });
+    }
+  }
+}
+
+function extractTokenUsage(row, state, scopeKey) {
+  if (row?.type === 'turn_context' && row.payload?.model) {
+    state.turnModel = row.payload.model;
+    if (!state.sessionModel) state.sessionModel = row.payload.model;
+    return null;
+  }
+
+  if (row?.type === 'session_meta' && row.payload?.model) {
+    state.sessionModel = row.payload.model;
+    return null;
+  }
+
+  if (row?.type !== 'event_msg' || row.payload?.type !== 'token_count') return null;
+
+  const info = row.payload?.info;
+  if (!info) return null;
+
+  const cumulativeTotal = info.total_token_usage?.total_tokens ?? 0;
+  const dedupeKey = `${scopeKey}:${row.timestamp || ''}:${cumulativeTotal}`;
+  if (cumulativeTotal > 0 && state.seen.has(dedupeKey)) return null;
+  if (cumulativeTotal > 0) state.seen.add(dedupeKey);
+
+  const last = info.last_token_usage;
+  let inputTokens = 0;
+  let cachedInputTokens = 0;
+  let outputTokens = 0;
+  let reasoningTokens = 0;
+
+  if (last) {
+    inputTokens = last.input_tokens ?? 0;
+    cachedInputTokens = last.cached_input_tokens ?? 0;
+    outputTokens = last.output_tokens ?? 0;
+    reasoningTokens = last.reasoning_output_tokens ?? 0;
+  } else if (cumulativeTotal > 0 && info.total_token_usage) {
+    inputTokens = (info.total_token_usage.input_tokens ?? 0) - state.prevInput;
+    cachedInputTokens = (info.total_token_usage.cached_input_tokens ?? 0) - state.prevCached;
+    outputTokens = (info.total_token_usage.output_tokens ?? 0) - state.prevOutput;
+    reasoningTokens = (info.total_token_usage.reasoning_output_tokens ?? 0) - state.prevReasoning;
+  }
+
+  if (info.total_token_usage) {
+    state.prevInput = info.total_token_usage.input_tokens ?? state.prevInput;
+    state.prevCached = info.total_token_usage.cached_input_tokens ?? state.prevCached;
+    state.prevOutput = info.total_token_usage.output_tokens ?? state.prevOutput;
+    state.prevReasoning = info.total_token_usage.reasoning_output_tokens ?? state.prevReasoning;
+  }
+
+  const normalizedUsage = {
+    inputTokens: Math.max(0, inputTokens - cachedInputTokens),
+    cachedInputTokens: Math.max(0, cachedInputTokens),
+    outputTokens: Math.max(0, outputTokens),
+    reasoningTokens: Math.max(0, reasoningTokens)
+  };
+
+  normalizedUsage.totalTokens = normalizedUsage.inputTokens + normalizedUsage.cachedInputTokens + normalizedUsage.outputTokens + normalizedUsage.reasoningTokens;
+  if (!normalizedUsage.totalTokens) return null;
+
+  const model = resolveTokenModel(row, state);
+  normalizedUsage.estimatedCostUsd = estimateUsageCostUsd(model, normalizedUsage);
+
+  return {
+    timestamp: row.timestamp || null,
+    model,
+    usage: normalizedUsage
+  };
 }
 
 function resolveIfExists(basePath, ...parts) {
@@ -552,6 +856,17 @@ function parseSessionFile(filePath, sessionIndex) {
   let messageCount = 0;
   let toolCallCount = 0;
   const toolBreakdown = {};
+  const tokenUsage = emptyTokenUsage();
+  const modelBreakdown = {};
+  const tokenState = {
+    sessionModel: null,
+    turnModel: null,
+    prevInput: 0,
+    prevCached: 0,
+    prevOutput: 0,
+    prevReasoning: 0,
+    seen: new Set()
+  };
 
   for (const line of raw.split('\n').filter(Boolean)) {
     let row;
@@ -568,6 +883,7 @@ function parseSessionFile(filePath, sessionIndex) {
 
     if (row.type === 'session_meta') {
       meta = row.payload || {};
+      if (row.payload?.model) tokenState.sessionModel = row.payload.model;
       if (!startedAt && row.payload?.timestamp) startedAt = row.payload.timestamp;
       continue;
     }
@@ -580,6 +896,21 @@ function parseSessionFile(filePath, sessionIndex) {
 
     if (row.type === 'event_msg' && row.payload?.type === 'agent_message') {
       messageCount += 1;
+      continue;
+    }
+
+    const tokenEntry = extractTokenUsage(row, tokenState, filePath);
+    if (tokenEntry) {
+      mergeTokenUsage(tokenUsage, tokenEntry.usage);
+      if (!modelBreakdown[tokenEntry.model]) {
+        modelBreakdown[tokenEntry.model] = {
+          model: tokenEntry.model,
+          calls: 0,
+          ...emptyTokenUsage()
+        };
+      }
+      modelBreakdown[tokenEntry.model].calls += 1;
+      mergeTokenUsage(modelBreakdown[tokenEntry.model], tokenEntry.usage);
       continue;
     }
 
@@ -602,6 +933,7 @@ function parseSessionFile(filePath, sessionIndex) {
     cwd: meta.cwd || null,
     cliVersion: meta.cli_version || null,
     modelProvider: meta.model_provider || null,
+    model: canonicalModelName(tokenState.turnModel || tokenState.sessionModel || meta?.model || '') || null,
     source: meta.source || null,
     startedAt: startedAt || meta.timestamp || null,
     endedAt: endedAt || indexed.updatedAt || null,
@@ -609,6 +941,8 @@ function parseSessionFile(filePath, sessionIndex) {
     messageCount,
     toolCallCount,
     toolBreakdown,
+    tokenUsage,
+    modelBreakdown: Object.values(modelBreakdown).sort((a, b) => b.totalTokens - a.totalTokens),
     filePath,
     fileSize: stat.size
   };
@@ -755,20 +1089,24 @@ function countDailyUsage(projectPath = null, options = {}) {
   const range = normalizeStatsRange(options);
   const byDate = new Map();
   const filteredSessions = listSessions(target);
-  const allowedSessionIds = new Set(filteredSessions.map(session => session.id));
+  let sessionsInRange = 0;
 
   for (let ts = range.start.getTime(); ts <= range.end.getTime(); ts += 24 * 60 * 60 * 1000) {
     const date = new Date(ts).toISOString().slice(0, 10);
-    byDate.set(date, { date, prompts: 0, sessions: 0, tools: 0 });
-  }
-
-  for (const entry of readHistoryEntries(5000)) {
-    const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0;
-    if (!ts || ts < range.start.getTime() || ts > range.end.getTime()) continue;
-    if (target && !allowedSessionIds.has(entry.sessionId)) continue;
-    const date = new Date(ts).toISOString().slice(0, 10);
-    const bucket = byDate.get(date);
-    if (bucket) bucket.prompts += 1;
+    byDate.set(date, {
+      date,
+      prompts: 0,
+      sessions: 0,
+      tools: 0,
+      turns: 0,
+      calls: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0
+    });
   }
 
   for (const session of filteredSessions) {
@@ -777,21 +1115,164 @@ function countDailyUsage(projectPath = null, options = {}) {
     const date = new Date(ts).toISOString().slice(0, 10);
     const bucket = byDate.get(date);
     if (!bucket) continue;
+    sessionsInRange += 1;
     bucket.sessions += 1;
-    bucket.tools += session.toolCallCount || 0;
   }
 
-  return Array.from(byDate.values());
+  const totals = {
+    prompts: 0,
+    sessions: sessionsInRange,
+    tools: 0,
+    turns: 0,
+    calls: 0,
+    ...emptyTokenUsage()
+  };
+  const modelTotals = {};
+  totals.byTaskType = {};
+  totals.byProject = {};
+  totals.byTool = {};
+  totals.byMcpServer = {};
+
+  for (const session of filteredSessions) {
+    const raw = safeReadText(session.filePath);
+    if (!raw) continue;
+    const sessionTs = session.updatedAt ? new Date(session.updatedAt).getTime() : 0;
+    if (sessionTs && sessionTs >= range.start.getTime() && sessionTs <= range.end.getTime()) {
+      const projectName = session.cwd || '(unknown)';
+      if (!totals.byProject[projectName]) totals.byProject[projectName] = createBreakdownEntry(projectName);
+      totals.byProject[projectName].sessions += 1;
+    }
+
+    const tokenState = {
+      sessionModel: session.model || null,
+      turnModel: null,
+      prevInput: 0,
+      prevCached: 0,
+      prevOutput: 0,
+      prevReasoning: 0,
+      seen: new Set()
+    };
+    let currentTurn = createUsageTurn();
+    const flushTurn = () => {
+      if (!currentTurn.timestamp && !currentTurn.userMessage && !Object.keys(currentTurn.toolCounts).length && !currentTurn.totalTokens) return;
+      if (currentTurn.timestamp) {
+        const day = currentTurn.timestamp.slice(0, 10);
+        const bucket = byDate.get(day);
+        if (bucket) bucket.turns += 1;
+      }
+      totals.turns += 1;
+      finalizeUsageTurn(currentTurn, session, totals);
+      currentTurn = createUsageTurn();
+    };
+
+    for (const line of raw.split('\n').filter(Boolean)) {
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const entryTs = row.timestamp ? new Date(row.timestamp).getTime() : 0;
+      const inRange = entryTs && entryTs >= range.start.getTime() && entryTs <= range.end.getTime();
+      if (inRange) {
+        const date = new Date(entryTs).toISOString().slice(0, 10);
+        const bucket = byDate.get(date);
+
+        if (bucket && row.type === 'event_msg' && row.payload?.type === 'user_message') {
+          flushTurn();
+          currentTurn.userMessage = row.payload.message || '';
+          currentTurn.timestamp = row.timestamp || currentTurn.timestamp;
+          bucket.prompts += 1;
+          totals.prompts += 1;
+          continue;
+        }
+
+        if (row.type === 'response_item' && row.payload?.type === 'function_call') {
+          addTurnTool(currentTurn, row.payload.name);
+          if (bucket) bucket.tools += 1;
+          totals.tools += 1;
+          continue;
+        }
+
+        if (bucket && row.type === 'event_msg') {
+          const tool = toolNameFromEventType(row.payload?.type);
+          if (tool) {
+            continue;
+          }
+        }
+      }
+
+      const tokenEntry = extractTokenUsage(row, tokenState, session.id || session.filePath);
+      if (!tokenEntry) continue;
+      const tokenTs = tokenEntry.timestamp ? new Date(tokenEntry.timestamp).getTime() : 0;
+      if (!tokenTs || tokenTs < range.start.getTime() || tokenTs > range.end.getTime()) continue;
+
+      const date = new Date(tokenTs).toISOString().slice(0, 10);
+      const bucket = byDate.get(date);
+      if (!bucket) continue;
+
+      mergeTokenUsage(bucket, tokenEntry.usage);
+      mergeTokenUsage(totals, tokenEntry.usage);
+      bucket.calls += 1;
+      totals.calls += 1;
+
+      currentTurn.timestamp = currentTurn.timestamp || tokenEntry.timestamp;
+      currentTurn.tokenUpdates += 1;
+      mergeTokenUsage(currentTurn, tokenEntry.usage);
+
+      if (!modelTotals[tokenEntry.model]) {
+        modelTotals[tokenEntry.model] = {
+          name: tokenEntry.model,
+          calls: 0,
+          ...emptyTokenUsage()
+        };
+      }
+      modelTotals[tokenEntry.model].calls += 1;
+      mergeTokenUsage(modelTotals[tokenEntry.model], tokenEntry.usage);
+    }
+
+    flushTurn();
+  }
+
+  const sortBreakdown = list => list.sort((a, b) => (b.estimatedCostUsd || 0) - (a.estimatedCostUsd || 0) || (b.totalTokens || 0) - (a.totalTokens || 0));
+
+  const breakdownTaskType = sortBreakdown(Object.values(totals.byTaskType));
+  const breakdownProject = sortBreakdown(Object.values(totals.byProject));
+  const breakdownTool = sortBreakdown(Object.values(totals.byTool)).slice(0, 12);
+  const breakdownMcp = sortBreakdown(Object.values(totals.byMcpServer)).slice(0, 12);
+  delete totals.byTaskType;
+  delete totals.byProject;
+  delete totals.byTool;
+  delete totals.byMcpServer;
+
+  return {
+    daily: Array.from(byDate.values()),
+    totals,
+    byTaskType: breakdownTaskType,
+    byProject: breakdownProject,
+    byTool: breakdownTool,
+    byMcpServer: breakdownMcp,
+    topModels: Object.values(modelTotals)
+      .sort((a, b) => b.totalTokens - a.totalTokens)
+      .slice(0, 8)
+  };
 }
 
 function buildUsageStats(projectPath = null, options = {}) {
-  const daily = countDailyUsage(projectPath, options);
+  const usage = countDailyUsage(projectPath, options);
   const tools = countToolUsage(projectPath, options);
   return {
     period: tools.period,
     from: tools.from,
     to: tools.to,
-    daily,
+    daily: usage.daily,
+    totals: usage.totals,
+    topModels: usage.topModels,
+    byTaskType: usage.byTaskType,
+    byProject: usage.byProject,
+    byTool: usage.byTool,
+    byMcpServer: usage.byMcpServer,
     topTools: Object.entries(tools.toolUsage)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)

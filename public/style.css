@@ -409,6 +409,14 @@ input {
   color: var(--muted);
 }
 
+.kv strong,
+.project-row span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: right;
+}
+
 .skill-card,
 .mini-card,
 .history-item,
@@ -428,6 +436,24 @@ input {
 .stats-dashboard {
   display: grid;
   gap: 18px;
+}
+
+.stats-dashboard > .panel,
+.stats-dashboard .grid.two > .panel {
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stats-dashboard > .panel:first-child {
+  height: 190px;
+}
+
+.stats-dashboard > .panel .panel-body,
+.stats-dashboard .grid.two > .panel .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .stats-range {
@@ -469,9 +495,15 @@ input {
   color: var(--text);
 }
 
+.stats-presets .ghost.active {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
 .stats-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 14px;
 }
 
@@ -480,6 +512,9 @@ input {
   border: 1px solid var(--panel-border);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.38);
+  min-height: 132px;
+  max-height: 132px;
+  overflow-y: auto;
 }
 
 .stat-tile.emphasis {
@@ -491,10 +526,18 @@ input {
   font-size: 20px;
   font-weight: 800;
   line-height: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .stat-tile.emphasis .stat-value {
   color: var(--brand);
+}
+
+.stat-value.compact {
+  font-size: clamp(16px, 1.8vw, 18px);
+  line-height: 1.15;
 }
 
 .stat-label {
@@ -533,6 +576,10 @@ input {
   background: #66dcc2;
 }
 
+.legend-dot.total {
+  background: #1f9d84;
+}
+
 .legend-dot.sessions {
   background: #8f62d5;
 }
@@ -569,6 +616,19 @@ input {
   grid-template-columns: 160px 1fr auto;
   gap: 10px;
   align-items: center;
+  min-width: 0;
+}
+
+.tool-row-wide {
+  grid-template-columns: 160px 1fr auto auto;
+}
+
+.tool-row > span,
+.tool-row > strong,
+.tool-row-wide > span,
+.tool-row-wide > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tool-bar {
@@ -928,6 +988,23 @@ pre {
 
   .stats-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats-dashboard > .panel,
+  .stats-dashboard .grid.two > .panel,
+  .stats-dashboard > .panel:first-child {
+    height: auto;
+    min-height: 0;
+  }
+
+  .stat-tile {
+    min-height: 120px;
+    max-height: none;
+  }
+
+  .tool-row,
+  .tool-row-wide {
+    grid-template-columns: 1fr;
   }
 
   .stats-range {
