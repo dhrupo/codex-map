@@ -1,0 +1,20 @@
+{
+  "name": "codex-map-local",
+  "interface": {
+    "displayName": "Codex Map Local"
+  },
+  "plugins": [
+    {
+      "name": "codex-map",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-map"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

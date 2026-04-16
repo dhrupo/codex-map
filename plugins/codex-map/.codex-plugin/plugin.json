@@ -1,0 +1,48 @@
+{
+  "name": "codex-map",
+  "version": "0.1.2",
+  "description": "Visual dashboard for inspecting and mapping your Codex CLI setup.",
+  "author": {
+    "name": "dhrupo",
+    "email": "",
+    "url": "https://github.com/dhrupo"
+  },
+  "homepage": "https://github.com/dhrupo/codex-map",
+  "repository": "https://github.com/dhrupo/codex-map",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "dashboard",
+    "usage",
+    "sessions",
+    "mcp"
+  ],
+  "interface": {
+    "displayName": "Codex Map",
+    "shortDescription": "Inspect Codex sessions, skills, MCP, and token burn.",
+    "longDescription": "Codex Map makes your Codex home and project overlays visible with dashboards for sessions, skills, MCP servers, plugins, raw files, and detailed token burn analytics.",
+    "developerName": "dhrupo",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/dhrupo/codex-map",
+    "privacyPolicyURL": "https://github.com/dhrupo/codex-map",
+    "termsOfServiceURL": "https://github.com/dhrupo/codex-map",
+    "defaultPrompt": [
+      "Open the Codex usage dashboard for this machine.",
+      "Show which projects burn the most Codex tokens.",
+      "Inspect skills, MCP servers, and recent sessions."
+    ],
+    "brandColor": "#0A8A72",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": [
+      "./assets/screenshot1.png",
+      "./assets/screenshot2.png",
+      "./assets/screenshot3.png"
+    ]
+  }
+}
